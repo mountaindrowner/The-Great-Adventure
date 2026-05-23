@@ -1,0 +1,1335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>The Great Adventure — Phase 1</title>
+<style>
+  /* ===== RESET / BASE ===== */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0b1220; color: #f4ead5; font-family: 'Courier New', monospace; }
+  img, canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+
+  /* ===== STAGE — fixed 1920x1080 scaled to viewport ===== */
+  #stage-wrap { position: fixed; inset: 0; display: grid; place-items: center; background: #000; }
+  #stage {
+    position: relative;
+    width: 1920px; height: 1080px;
+    transform-origin: center center;
+    background: linear-gradient(180deg, #d9a86b 0%, #c08850 40%, #8a5a2c 75%, #5a3a1c 100%);
+    overflow: hidden;
+  }
+
+  /* ===== SKY / DECOR ===== */
+  .sun { position: absolute; left: 1620px; top: 80px; width: 120px; height: 120px; background: #ffd55a; border-radius: 50%; box-shadow: 0 0 80px 30px #ffb02e80; }
+  .dune { position: absolute; bottom: 0; height: 240px; border-radius: 50% 50% 0 0 / 100% 100% 0 0; opacity: .55; }
+  .dune.d1 { left: -120px; width: 900px; background: #6b4220; }
+  .dune.d2 { left: 700px; width: 1100px; background: #7a4d28; }
+  .dune.d3 { left: 1500px; width: 700px; background: #6b4220; }
+
+  /* ===== BOARD TILES ===== */
+  .tile {
+    position: absolute;
+    width: 130px; height: 130px;
+    border: 5px solid #2a1808;
+    border-radius: 16px;
+    display: grid; place-items: center;
+    font-size: 56px;
+    box-shadow: 0 8px 0 #2a1808, inset 0 0 0 4px #f4ead555;
+    transition: transform .15s;
+  }
+  .tile .num { position: absolute; top: 2px; left: 8px; font-size: 18px; color: #2a1808; font-weight: bold; text-shadow: 0 0 3px #fff8; }
+  .tile.start    { background: #6abf3c; }
+  .tile.goal     { background: linear-gradient(135deg, #ffd55a, #ff9c2a); animation: goalPulse 1.4s ease-in-out infinite; }
+  .tile.question { background: #4a8fd6; }
+  .tile.treasure { background: #d9b34a; }
+  .tile.minigame { background: #b34acd; }
+  .tile.highlight { transform: scale(1.12); filter: brightness(1.3); }
+  @keyframes goalPulse { 0%,100%{ filter: brightness(1); } 50%{ filter: brightness(1.4); } }
+
+  /* ===== TEAM TOKENS ===== */
+  .token {
+    position: absolute;
+    width: 90px; height: 90px;
+    display: grid; place-items: center;
+    font-size: 68px;
+    transition: transform .35s cubic-bezier(.4,1.6,.6,1);
+    pointer-events: none;
+    filter: drop-shadow(0 4px 0 #00000080);
+    z-index: 10;
+  }
+  .token.active { animation: bounce 0.6s ease-in-out infinite; }
+  @keyframes bounce { 0%,100%{ translate: 0 0; } 50%{ translate: 0 -12px; } }
+  .token-ring {
+    position: absolute; width: 90px; height: 90px;
+    border-radius: 50%; border: 6px solid currentColor;
+    box-shadow: 0 0 24px currentColor;
+    animation: ring 1.2s ease-in-out infinite;
+  }
+  @keyframes ring { 0%,100%{ transform: scale(1); opacity: 1; } 50%{ transform: scale(1.18); opacity: .4; } }
+
+  /* ===== HUD (bottom strip) ===== */
+  #hud {
+    position: absolute; left: 0; right: 0; bottom: 0;
+    height: 220px;
+    background: linear-gradient(180deg, #1a1208ee, #0b0804f0);
+    border-top: 6px solid #f4ead5;
+    display: grid;
+    grid-template-columns: 360px 1fr 1fr 1fr 280px;
+    gap: 16px;
+    padding: 16px 24px;
+    z-index: 50;
+  }
+  #hud.compact { height: 90px; padding: 8px 24px; }
+  .panel {
+    background: #2a1808;
+    border: 4px solid #f4ead5;
+    border-radius: 12px;
+    padding: 10px 14px;
+    color: #f4ead5;
+    display: flex; flex-direction: column;
+    overflow: hidden;
+  }
+  .panel h3 { font-size: 22px; margin-bottom: 6px; letter-spacing: 1px; }
+  .panel .row { display: flex; gap: 8px; align-items: center; font-size: 18px; }
+  .panel.team { border-width: 6px; }
+  .panel.team.active { box-shadow: 0 0 32px currentColor, inset 0 0 16px currentColor; }
+  .panel.team .name { font-size: 26px; font-weight: bold; display: flex; align-items: center; gap: 8px; }
+  .panel.team .stats { display: flex; gap: 16px; font-size: 18px; margin-top: 4px; }
+  .panel.team .inv { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .powerchip {
+    background: #f4ead5; color: #2a1808;
+    border: 2px solid #2a1808; border-radius: 6px;
+    padding: 2px 8px; font-size: 14px; font-weight: bold;
+    cursor: pointer;
+  }
+  .powerchip:hover { background: #ffd55a; }
+
+  /* ===== PRIMARY ACTION + CONTROLS ===== */
+  #controls { display: flex; flex-direction: column; gap: 8px; }
+  #primary-btn {
+    flex: 1;
+    background: #6abf3c; color: #0b1220;
+    font-family: inherit; font-size: 38px; font-weight: bold;
+    border: 5px solid #f4ead5; border-radius: 12px;
+    cursor: pointer; letter-spacing: 2px;
+    box-shadow: 0 6px 0 #2a1808;
+    transition: transform .08s, box-shadow .08s;
+  }
+  #primary-btn:hover { filter: brightness(1.1); }
+  #primary-btn:active { transform: translateY(4px); box-shadow: 0 2px 0 #2a1808; }
+  #primary-btn:disabled { background: #5a5a5a; cursor: not-allowed; opacity: .6; }
+  .ctrl-row { display: flex; gap: 6px; }
+  .smallbtn {
+    background: #4a3a20; color: #f4ead5;
+    border: 3px solid #f4ead5; border-radius: 8px;
+    padding: 6px 10px; font-family: inherit; font-size: 14px;
+    cursor: pointer; flex: 1;
+  }
+  .smallbtn:hover { background: #6a5a40; }
+
+  /* ===== DICE OVERLAY ===== */
+  #dice-overlay {
+    position: absolute; inset: 0;
+    display: none; place-items: center;
+    background: #0b122080;
+    z-index: 100;
+  }
+  #dice-overlay.show { display: grid; }
+  #dice {
+    width: 200px; height: 200px;
+    background: #f4ead5; color: #2a1808;
+    border: 8px solid #2a1808; border-radius: 24px;
+    display: grid; place-items: center;
+    font-size: 140px; font-weight: bold;
+    box-shadow: 0 16px 0 #2a1808, 0 0 80px #ffd55a;
+  }
+  #dice.rolling { animation: diceShake .08s linear infinite; }
+  @keyframes diceShake {
+    0% { transform: rotate(-12deg) translate(-4px, 2px); }
+    25% { transform: rotate(8deg) translate(4px, -3px); }
+    50% { transform: rotate(-6deg) translate(-2px, 4px); }
+    75% { transform: rotate(10deg) translate(3px, -2px); }
+    100% { transform: rotate(-12deg) translate(-4px, 2px); }
+  }
+
+  /* ===== MODAL ===== */
+  #modal {
+    position: absolute; inset: 0;
+    display: none; place-items: center;
+    background: #0b1220cc;
+    z-index: 90;
+  }
+  #modal.show { display: grid; }
+  .card {
+    width: 1200px; max-height: 740px;
+    background: linear-gradient(180deg, #f4ead5, #d9c89a);
+    color: #2a1808;
+    border: 8px solid #2a1808;
+    border-radius: 24px;
+    padding: 36px 48px;
+    box-shadow: 0 20px 0 #2a1808;
+    display: flex; flex-direction: column; gap: 24px;
+  }
+  .card .badge { font-size: 22px; letter-spacing: 4px; opacity: .7; }
+  .card h1 { font-size: 56px; line-height: 1.1; }
+  .card .body { font-size: 32px; line-height: 1.3; flex: 1; }
+  .choices { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  .choice {
+    background: #fffaee; color: #2a1808;
+    border: 5px solid #2a1808; border-radius: 12px;
+    padding: 16px 20px; font-family: inherit; font-size: 28px;
+    cursor: pointer; text-align: left;
+    transition: transform .08s;
+  }
+  .choice .letter { font-weight: bold; font-size: 36px; color: #b34acd; margin-right: 12px; }
+  .choice:hover { background: #ffd55a; }
+  .choice.picked { background: #ffd55a; transform: scale(1.02); }
+  .choice.correct { background: #6abf3c; color: #fff; }
+  .choice.incorrect { background: #d64a4a; color: #fff; }
+  .card-actions { display: flex; gap: 16px; justify-content: flex-end; }
+  .cardbtn {
+    background: #6abf3c; color: #fff;
+    border: 5px solid #2a1808; border-radius: 12px;
+    padding: 14px 32px; font-family: inherit; font-size: 26px; font-weight: bold;
+    cursor: pointer;
+    box-shadow: 0 6px 0 #2a1808;
+  }
+  .cardbtn.wrong { background: #d64a4a; }
+  .cardbtn.neutral { background: #6a5a40; }
+  .cardbtn:active { transform: translateY(3px); box-shadow: 0 3px 0 #2a1808; }
+  .cardbtn:disabled { opacity: .4; cursor: not-allowed; }
+
+  /* ===== STRATEGIC 6 CARD ===== */
+  .strategic-choices { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
+  .strat-btn {
+    background: #fffaee; border: 5px solid #2a1808; border-radius: 16px;
+    padding: 24px; font-family: inherit; font-size: 30px; font-weight: bold;
+    cursor: pointer; color: #2a1808;
+    box-shadow: 0 6px 0 #2a1808;
+  }
+  .strat-btn .emoji { font-size: 80px; display: block; margin-bottom: 12px; }
+  .strat-btn:hover { background: #ffd55a; }
+  .strat-btn:active { transform: translateY(3px); box-shadow: 0 3px 0 #2a1808; }
+
+  /* ===== TREASURE CARD ===== */
+  .treasure-icon { font-size: 180px; text-align: center; }
+  .treasure-name { font-size: 64px; text-align: center; font-weight: bold; color: #b34acd; }
+  .treasure-desc { font-size: 28px; text-align: center; }
+
+  /* ===== MINIGAME CARD ===== */
+  #mg-wheel {
+    background: #2a1808; color: #ffd55a;
+    border: 5px solid #2a1808; border-radius: 16px;
+    padding: 24px; font-size: 64px; text-align: center; font-weight: bold;
+    min-height: 130px; display: grid; place-items: center;
+  }
+  #mg-wheel.spinning { animation: wheelFlash .12s linear infinite; }
+  @keyframes wheelFlash {
+    0% { background: #2a1808; color: #ffd55a; }
+    50% { background: #b34acd; color: #fff; }
+    100% { background: #2a1808; color: #ffd55a; }
+  }
+  .mg-winners { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
+  .mg-winner-btn {
+    background: #fffaee; border: 5px solid currentColor; border-radius: 12px;
+    padding: 16px; font-family: inherit; font-size: 28px; font-weight: bold;
+    cursor: pointer; color: #2a1808;
+  }
+
+  /* ===== VICTORY ===== */
+  #victory {
+    position: absolute; inset: 0;
+    display: none; place-items: center;
+    background: #0b1220e8;
+    z-index: 95; flex-direction: column;
+  }
+  #victory.show { display: flex; }
+  #victory h1 {
+    font-size: 140px; color: #ffd55a;
+    text-shadow: 0 6px 0 #2a1808, 0 0 60px #ffd55a;
+    animation: victoryBounce 1.2s ease-in-out infinite;
+  }
+  #victory h2 { font-size: 80px; color: #f4ead5; margin: 20px 0; }
+  #victory .trophy { font-size: 240px; }
+  @keyframes victoryBounce { 0%,100% { transform: scale(1); } 50% { transform: scale(1.06); } }
+  .confetti {
+    position: absolute; width: 16px; height: 16px;
+    pointer-events: none;
+  }
+
+  /* ===== TOAST ===== */
+  #toast {
+    position: absolute; top: 24px; left: 50%; transform: translateX(-50%);
+    background: #2a1808; color: #f4ead5;
+    border: 4px solid #f4ead5; border-radius: 12px;
+    padding: 14px 28px; font-size: 24px;
+    z-index: 200; opacity: 0; pointer-events: none;
+    transition: opacity .3s;
+  }
+  #toast.show { opacity: 1; }
+
+  /* ===== KEYHINTS ===== */
+  #keyhints {
+    position: absolute; top: 16px; left: 16px;
+    background: #2a1808a0; color: #f4ead5;
+    border: 2px solid #f4ead5; border-radius: 8px;
+    padding: 8px 14px; font-size: 14px;
+    z-index: 40; line-height: 1.5;
+  }
+  kbd { background: #f4ead5; color: #2a1808; padding: 1px 6px; border-radius: 3px; font-weight: bold; }
+</style>
+</head>
+<body>
+<div id="stage-wrap"><div id="stage">
+
+  <!-- Decor -->
+  <div class="sun"></div>
+  <div class="dune d1"></div>
+  <div class="dune d2"></div>
+  <div class="dune d3"></div>
+
+  <!-- Board tiles + tokens go here, populated by JS -->
+  <div id="board"></div>
+  <div id="tokens"></div>
+
+  <!-- Key hints -->
+  <div id="keyhints">
+    <b>KEYS</b> &nbsp;
+    <kbd>SPACE</kbd> primary &nbsp;
+    <kbd>1-4</kbd> answer / pick &nbsp;
+    <kbd>↵</kbd> correct &nbsp;
+    <kbd>⌫</kbd> wrong &nbsp;
+    <kbd>U</kbd> undo &nbsp;
+    <kbd>M</kbd> mute &nbsp;
+    <kbd>F</kbd> fullscreen &nbsp;
+    <kbd>Tab</kbd> HUD
+  </div>
+
+  <!-- Toast -->
+  <div id="toast"></div>
+
+  <!-- Dice overlay -->
+  <div id="dice-overlay">
+    <div id="dice">?</div>
+  </div>
+
+  <!-- Modal -->
+  <div id="modal">
+    <div class="card" id="card-body"></div>
+  </div>
+
+  <!-- Victory overlay -->
+  <div id="victory">
+    <div class="trophy">🏆</div>
+    <h1 id="victory-team">WINNER!</h1>
+    <h2>The Great Adventure</h2>
+    <button class="cardbtn" id="victory-reset">PLAY AGAIN</button>
+  </div>
+
+  <!-- HUD -->
+  <div id="hud">
+    <div class="panel" id="turn-panel">
+      <h3>TURN</h3>
+      <div class="row" id="turn-text">Turn 1 — Lions</div>
+      <div class="row" id="phase-text">Awaiting roll</div>
+      <div class="row" style="margin-top:auto;font-size:14px;opacity:.7">The Great Adventure · Wilderness</div>
+    </div>
+
+    <div class="panel team" id="team-0"></div>
+    <div class="panel team" id="team-1"></div>
+    <div class="panel team" id="team-2"></div>
+
+    <div id="controls">
+      <button id="primary-btn">ROLL</button>
+      <div class="ctrl-row">
+        <button class="smallbtn" id="btn-undo">UNDO (U)</button>
+        <button class="smallbtn" id="btn-mute">🔊 (M)</button>
+      </div>
+      <div class="ctrl-row">
+        <button class="smallbtn" id="btn-fs">FULLSCREEN (F)</button>
+        <button class="smallbtn" id="btn-hud">HUD (Tab)</button>
+      </div>
+    </div>
+  </div>
+
+</div></div>
+
+<script>
+'use strict';
+
+// =====================================================================
+// CONSTANTS & CONFIG
+// =====================================================================
+
+const BOARD_SPACES = [
+  // Index 0 is START. Coordinates target stage 1920x1080, tile size 130.
+  { type: 'start',    x: 100,  y: 320 },
+  // Top row (left to right) — winding from start
+  { type: 'question', x: 270,  y: 320 },
+  { type: 'question', x: 440,  y: 320 },
+  { type: 'treasure', x: 610,  y: 320 },
+  { type: 'question', x: 780,  y: 320 },
+  { type: 'minigame', x: 950,  y: 320 },
+  { type: 'question', x: 1120, y: 320 },
+  { type: 'question', x: 1290, y: 320 },
+  // Curve down
+  { type: 'treasure', x: 1460, y: 320 },
+  { type: 'question', x: 1600, y: 420 },
+  // Middle row (right to left)
+  { type: 'question', x: 1460, y: 540 },
+  { type: 'minigame', x: 1290, y: 540 },
+  { type: 'question', x: 1120, y: 540 },
+  { type: 'question', x: 950,  y: 540 },
+  { type: 'treasure', x: 780,  y: 540 },
+  { type: 'question', x: 610,  y: 540 },
+  // Curve down
+  { type: 'question', x: 440,  y: 540 },
+  { type: 'question', x: 300,  y: 640 },
+  // Bottom row (left to right)
+  { type: 'minigame', x: 440,  y: 760 },
+  { type: 'question', x: 610,  y: 760 },
+  { type: 'goal',     x: 800,  y: 760 },
+];
+// Total path length: BOARD_SPACES.length - 1 = 20 spaces to traverse from start to goal.
+
+const TEAMS = [
+  { id: 'lions',  name: 'LIONS',  mascot: '🦁', color: '#d97706', tier: 'lions'  },
+  { id: 'eagles', name: 'EAGLES', mascot: '🦅', color: '#b94a1c', tier: 'eagles' },
+  { id: 'doves',  name: 'DOVES',  mascot: '🕊️',  color: '#e8e6dc', tier: 'doves'  },
+];
+
+const POWERUPS = {
+  double:  { id: 'double',   name: 'Double Roll', icon: '🎲🎲', desc: 'Roll twice and take the sum on your next turn.' },
+  stumble: { id: 'stumble',  name: 'Stumble',     icon: '💨',    desc: 'Pick another team. They lose their next turn.' },
+  shield:  { id: 'shield',   name: 'Sanctuary',   icon: '🛡️',    desc: 'Block the next bad effect aimed at your team.' },
+  mulligan:{ id: 'mulligan', name: 'Mulligan',    icon: '🔄',    desc: 'Re-roll the dice once on your turn.' },
+};
+const POWERUP_KEYS = Object.keys(POWERUPS);
+
+const MINIGAME_LIBRARY = [
+  'Mirror Mirror',
+  'Memory Verse Scramble',
+  'Bible Says',
+  'Memory Verse Match',
+];
+
+const RUBBER_BAND_THRESHOLD = 4;   // spaces behind leader before bias kicks in
+const RUBBER_BAND_BIAS_PROB = 0.30; // probability that a trailing team's roll is biased upward
+
+// =====================================================================
+// QUESTION BANKS (age-tiered, Wilderness/Exodus theme)
+// =====================================================================
+
+const QUESTIONS = {
+  lions: [
+    { q: 'Who led God\'s people out of Egypt?', a: ['Moses','Noah','Joseph','David'], c: 0 },
+    { q: 'What kind of bush did Moses see?',    a: ['Apple','Burning','Rose','Cherry'], c: 1 },
+    { q: 'What sea did God split for the people?', a: ['Yellow Sea','Blue Sea','Red Sea','Green Sea'], c: 2 },
+    { q: 'What food fell from the sky in the desert?', a: ['Pizza','Manna','Cake','Bread'], c: 1 },
+    { q: 'Where did water come from for the people to drink?', a: ['A cloud','A bottle','A rock','A tree'], c: 2 },
+    { q: 'Who was Moses\'s brother?',           a: ['Aaron','Adam','Andrew','Abel'], c: 0 },
+    { q: 'How many commandments did God give Moses?', a: ['Five','Ten','Twenty','One hundred'], c: 1 },
+    { q: 'What were God\'s people in Egypt?',   a: ['Slaves','Kings','Guests','Soldiers'], c: 0 },
+  ],
+  eagles: [
+    { q: 'What was the first plague God sent on Egypt?', a: ['Frogs','Locusts','Water turned to blood','Darkness'], c: 2 },
+    { q: 'Who was Moses\'s father-in-law?',     a: ['Aaron','Jethro','Joseph','Jacob'], c: 1 },
+    { q: 'What did Moses stretch out over the Red Sea?', a: ['Sword','Staff','Trumpet','Hand'], c: 1 },
+    { q: 'How many plagues did God send on Egypt?', a: ['Seven','Ten','Twelve','Five'], c: 1 },
+    { q: 'On what mountain did Moses receive the Law?', a: ['Sinai','Ararat','Zion','Carmel'], c: 0 },
+    { q: 'What idol did the Israelites build at the foot of the mountain?', a: ['Tower','Golden calf','Bronze snake','Stone altar'], c: 1 },
+    { q: 'Who led the people after Moses died?', a: ['Aaron','Joshua','David','Caleb'], c: 1 },
+    { q: 'How many years did Israel wander in the desert?', a: ['Seven','Twelve','Forty','One hundred'], c: 2 },
+  ],
+  doves: [
+    { q: 'What was the name of Moses\'s mother?', a: ['Miriam','Jochebed','Zipporah','Sarah'], c: 1 },
+    { q: 'Why was Moses given his name?', a: ['Means "deliverer"','Means "drawn out"','Means "shepherd"','Means "prince"'], c: 1 },
+    { q: 'Which plague was the death of the firstborn?', a: ['First','Fifth','Tenth','Seventh'], c: 2 },
+    { q: 'What feast remembers the Passover?', a: ['Hanukkah','Pesach','Sukkot','Purim'], c: 1 },
+    { q: 'What was put on the doorposts the night of the Passover?', a: ['Wine','Olive oil','Lamb\'s blood','Honey'], c: 2 },
+    { q: 'What was kept inside the Ark of the Covenant?', a: ['Gold coins','The tablets, manna, and Aaron\'s rod','Bread loaves','Sacred scrolls'], c: 1 },
+    { q: 'Who served as the first High Priest?', a: ['Caleb','Aaron','Joshua','Phinehas'], c: 1 },
+    { q: 'What led the Israelites by night through the wilderness?', a: ['Pillar of cloud','Pillar of fire','Bright star','Trail of smoke'], c: 1 },
+  ],
+};
+
+// =====================================================================
+// GAME STATE
+// =====================================================================
+
+let state = freshState();
+let history = [];   // stack of prior state snapshots for undo
+let pendingTimers = []; // track timers so we can cancel them on undo/reset
+
+function freshState() {
+  return {
+    turn: 1,
+    activeIdx: 0,
+    phase: 'awaiting-roll',
+    teams: TEAMS.map(t => ({
+      ...t,
+      position: 0,
+      score: 0,
+      inventory: [],
+      shielded: false,
+      skipNext: false,
+      mulliganUsed: false, // mulligan can be carried as inventory; this flag tracks "already re-rolled this turn"
+    })),
+    lastRoll: null,
+    pendingMove: null,   // when waiting on strategic-6 decision
+    currentQuestion: null,
+    selectedAnswer: null,
+    currentTreasure: null,
+    currentMinigame: null,
+    awaitingMulligan: false,   // true after roll if active team holds mulligan and may re-roll
+    awaitingStumbleTarget: null, // team index using stumble
+    muted: false,
+    hudCompact: false,
+    won: false,
+    winner: null,
+  };
+}
+
+// =====================================================================
+// HISTORY / UNDO
+// =====================================================================
+
+function snapshot() {
+  // Deep clone via JSON (state contains only primitives + arrays/objects of primitives)
+  history.push(JSON.parse(JSON.stringify(state)));
+  if (history.length > 50) history.shift();
+}
+
+function undo() {
+  if (!history.length) { toast('Nothing to undo'); return; }
+  cancelPendingTimers();
+  state = history.pop();
+  closeAllModals();
+  renderAll();
+  toast('Undid last action');
+}
+
+function cancelPendingTimers() {
+  for (const t of pendingTimers) clearTimeout(t);
+  pendingTimers = [];
+}
+function later(fn, ms) {
+  const id = setTimeout(() => {
+    pendingTimers = pendingTimers.filter(x => x !== id);
+    fn();
+  }, ms);
+  pendingTimers.push(id);
+  return id;
+}
+
+// =====================================================================
+// AUDIO (Web Audio synthesized SFX + light music loop)
+// =====================================================================
+
+let audioCtx = null;
+let musicGain = null;
+let musicTimer = null;
+
+function ensureAudio() {
+  if (audioCtx) return;
+  try {
+    audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    musicGain = audioCtx.createGain();
+    musicGain.gain.value = 0.06;
+    musicGain.connect(audioCtx.destination);
+    startMusic();
+  } catch (e) { /* ignore — silent if no audio */ }
+}
+
+function beep(freq, dur, type='sine', vol=0.18) {
+  if (!audioCtx || state.muted) return;
+  const o = audioCtx.createOscillator();
+  const g = audioCtx.createGain();
+  o.type = type;
+  o.frequency.value = freq;
+  g.gain.setValueAtTime(vol, audioCtx.currentTime);
+  g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
+  o.connect(g); g.connect(audioCtx.destination);
+  o.start();
+  o.stop(audioCtx.currentTime + dur);
+}
+
+function sequence(notes, type='triangle', vol=0.18) {
+  let t = 0;
+  for (const [freq, dur] of notes) {
+    setTimeout(() => beep(freq, dur, type, vol), t * 1000);
+    t += dur * 0.9;
+  }
+}
+
+const SFX = {
+  roll:     () => { for (let i=0;i<5;i++) setTimeout(()=>beep(200 + Math.random()*200, 0.05, 'square', 0.1), i*60); },
+  hop:      () => beep(523, 0.08, 'triangle', 0.14),
+  land:     () => sequence([[523,0.08],[659,0.12]], 'triangle'),
+  correct:  () => sequence([[523,0.1],[659,0.1],[784,0.18]], 'triangle', 0.22),
+  wrong:    () => sequence([[330,0.12],[247,0.22]], 'sawtooth', 0.16),
+  treasure: () => sequence([[523,0.08],[659,0.08],[784,0.08],[1047,0.18]], 'triangle', 0.20),
+  minigame: () => sequence([[392,0.1],[523,0.1],[659,0.1],[784,0.18]], 'square', 0.16),
+  victory:  () => sequence([[523,0.15],[659,0.15],[784,0.15],[1047,0.4]], 'triangle', 0.25),
+  click:    () => beep(880, 0.04, 'square', 0.10),
+};
+
+function startMusic() {
+  // Gentle 8-note loop in C, plays a soft pad-y arpeggio
+  const pattern = [261.63, 329.63, 392.00, 329.63, 293.66, 349.23, 440.00, 349.23];
+  let i = 0;
+  function step() {
+    if (!audioCtx || state.muted) {
+      musicTimer = setTimeout(step, 500);
+      return;
+    }
+    const o = audioCtx.createOscillator();
+    const g = audioCtx.createGain();
+    o.type = 'sine';
+    o.frequency.value = pattern[i % pattern.length];
+    g.gain.setValueAtTime(0, audioCtx.currentTime);
+    g.gain.linearRampToValueAtTime(0.04, audioCtx.currentTime + 0.05);
+    g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.55);
+    o.connect(g); g.connect(musicGain);
+    o.start();
+    o.stop(audioCtx.currentTime + 0.6);
+    i++;
+    musicTimer = setTimeout(step, 500);
+  }
+  step();
+}
+
+function toggleMute() {
+  state.muted = !state.muted;
+  document.getElementById('btn-mute').textContent = state.muted ? '🔇 (M)' : '🔊 (M)';
+  toast(state.muted ? 'Audio muted' : 'Audio on');
+}
+
+// =====================================================================
+// RENDER
+// =====================================================================
+
+function tileEmoji(type) {
+  return { start: '🏁', goal: '🏆', question: '❓', treasure: '🎁', minigame: '🎮' }[type] || '';
+}
+
+function renderBoard() {
+  const board = document.getElementById('board');
+  board.innerHTML = '';
+  BOARD_SPACES.forEach((sp, i) => {
+    const tile = document.createElement('div');
+    tile.className = `tile ${sp.type}`;
+    tile.style.left = (sp.x - 65) + 'px';
+    tile.style.top  = (sp.y - 65) + 'px';
+    tile.innerHTML = `<span class="num">${i === 0 ? 'START' : (i === BOARD_SPACES.length - 1 ? 'GOAL' : i)}</span>${tileEmoji(sp.type)}`;
+    board.appendChild(tile);
+  });
+}
+
+function renderTokens() {
+  const container = document.getElementById('tokens');
+  container.innerHTML = '';
+  state.teams.forEach((t, idx) => {
+    const sp = BOARD_SPACES[t.position];
+    // Offset tokens so they don't perfectly overlap on the same tile
+    const offsetX = (idx - 1) * 32;
+    const offsetY = (idx === 1) ? -8 : 0;
+    const tok = document.createElement('div');
+    tok.className = 'token' + (idx === state.activeIdx ? ' active' : '');
+    tok.style.left = (sp.x - 45 + offsetX) + 'px';
+    tok.style.top  = (sp.y - 45 + offsetY) + 'px';
+    tok.style.color = t.color;
+    tok.textContent = t.mascot;
+    container.appendChild(tok);
+  });
+}
+
+function renderHUD() {
+  // Turn panel
+  const active = state.teams[state.activeIdx];
+  document.getElementById('turn-text').innerHTML = `Turn ${state.turn} — <b style="color:${active.color}">${active.name}</b>`;
+  document.getElementById('phase-text').textContent = phaseLabel(state.phase);
+
+  // Team panels
+  state.teams.forEach((t, idx) => {
+    const panel = document.getElementById(`team-${idx}`);
+    panel.style.color = t.color;
+    panel.classList.toggle('active', idx === state.activeIdx);
+    const flags = [];
+    if (t.shielded) flags.push('🛡️');
+    if (t.skipNext) flags.push('💨');
+    panel.innerHTML = `
+      <div class="name">${t.mascot} ${t.name} ${flags.join('')}</div>
+      <div class="stats">
+        <span>📍 ${t.position}/${BOARD_SPACES.length - 1}</span>
+        <span>⭐ ${t.score}</span>
+      </div>
+      <div class="inv" id="inv-${idx}"></div>
+    `;
+    const inv = panel.querySelector('.inv');
+    t.inventory.forEach((p, pidx) => {
+      const chip = document.createElement('button');
+      chip.className = 'powerchip';
+      chip.textContent = `${POWERUPS[p].icon} ${POWERUPS[p].name}`;
+      chip.title = POWERUPS[p].desc;
+      chip.onclick = () => usePowerup(idx, pidx);
+      inv.appendChild(chip);
+    });
+  });
+
+  // Primary button
+  const primaryBtn = document.getElementById('primary-btn');
+  const pa = getPrimaryAction();
+  primaryBtn.textContent = pa.label;
+  primaryBtn.disabled = pa.disabled;
+  primaryBtn.style.background = pa.color || '#6abf3c';
+}
+
+function phaseLabel(phase) {
+  return {
+    'awaiting-roll':       'Awaiting roll — press SPACE',
+    'rolling':             'Rolling dice...',
+    'awaiting-strategic-6':'Strategic Choice — forward, back, or stay?',
+    'moving':              'Moving...',
+    'awaiting-answer':     'Awaiting answer — pick A/B/C/D',
+    'awaiting-judgment':   'Mark answer — Enter (correct) or ⌫ (wrong)',
+    'awaiting-treasure':   'Treasure! Press SPACE to continue',
+    'awaiting-minigame':   'Mini-game! Pick a winning tribe',
+    'won':                 'Game over!',
+    'resolving':           'Resolving...',
+  }[phase] || phase;
+}
+
+function getPrimaryAction() {
+  switch (state.phase) {
+    case 'awaiting-roll':       return { label: 'ROLL (SPACE)', color: '#6abf3c' };
+    case 'rolling':             return { label: 'rolling...', disabled: true };
+    case 'awaiting-strategic-6':return { label: 'CHOOSE on screen', disabled: true };
+    case 'moving':              return { label: 'moving...', disabled: true };
+    case 'awaiting-answer':     return { label: 'Pick A/B/C/D', disabled: true };
+    case 'awaiting-judgment':   return { label: '↵ correct  ⌫ wrong', disabled: true };
+    case 'awaiting-treasure':   return { label: 'CONTINUE (SPACE)', color: '#d9b34a' };
+    case 'awaiting-minigame':   return { label: 'Pick winner', disabled: true };
+    case 'won':                 return { label: 'GAME OVER', disabled: true };
+    default:                    return { label: '...', disabled: true };
+  }
+}
+
+function renderAll() {
+  renderBoard();
+  renderTokens();
+  renderHUD();
+}
+
+// =====================================================================
+// ACTIONS
+// =====================================================================
+
+function rollDice() {
+  if (state.phase !== 'awaiting-roll') return;
+  ensureAudio();
+  snapshot();
+
+  // Stumble check: if active team is set to skip, skip them
+  const active = state.teams[state.activeIdx];
+  if (active.skipNext) {
+    active.skipNext = false;
+    toast(`${active.name} are stumbling — turn skipped!`);
+    SFX.wrong();
+    passTurn();
+    return;
+  }
+
+  state.phase = 'rolling';
+  renderHUD();
+  SFX.roll();
+
+  const overlay = document.getElementById('dice-overlay');
+  const dice = document.getElementById('dice');
+  overlay.classList.add('show');
+  dice.classList.add('rolling');
+  dice.textContent = '?';
+
+  // Animation: flicker random numbers, then settle
+  let ticks = 0;
+  const flicker = setInterval(() => {
+    dice.textContent = 1 + Math.floor(Math.random() * 6);
+    ticks++;
+    if (ticks > 14) {
+      clearInterval(flicker);
+      let result = rollD6(state.activeIdx);
+      if (state.awaitingMulligan) {
+        const reroll = rollD6(state.activeIdx);
+        const better = Math.max(result, reroll);
+        dice.textContent = `${result}→${reroll}`;
+        dice.style.fontSize = '90px';
+        state.awaitingMulligan = false;
+        toast(`Mulligan: ${result} then ${reroll} → using ${better}`);
+        result = better;
+      } else {
+        dice.textContent = result;
+      }
+      dice.classList.remove('rolling');
+      state.lastRoll = result;
+      later(() => {
+        overlay.classList.remove('show');
+        dice.style.fontSize = '';
+        handleRollResult(result);
+      }, 900);
+    }
+  }, 70);
+}
+
+function rollD6(teamIdx) {
+  // Subtle rubber-banding: if team is far behind leader, weight rolls toward higher numbers
+  const leaderPos = Math.max(...state.teams.map(t => t.position));
+  const gap = leaderPos - state.teams[teamIdx].position;
+  const biased = gap >= RUBBER_BAND_THRESHOLD && Math.random() < RUBBER_BAND_BIAS_PROB;
+  if (biased) return 3 + Math.ceil(Math.random() * 3); // 4, 5, or 6
+  return 1 + Math.floor(Math.random() * 6);
+}
+
+function handleRollResult(roll) {
+  if (roll === 6) {
+    state.phase = 'awaiting-strategic-6';
+    state.pendingMove = 6;
+    renderHUD();
+    showStrategicChoice();
+  } else {
+    moveActive(roll);
+  }
+}
+
+function showStrategicChoice() {
+  const active = state.teams[state.activeIdx];
+  showCard(`
+    <div class="badge">STRATEGIC SIX</div>
+    <h1 style="color:${active.color}">${active.mascot} ${active.name} rolled a 6!</h1>
+    <div class="body">Choose your move carefully...</div>
+    <div class="strategic-choices">
+      <button class="strat-btn" data-strat="forward">
+        <span class="emoji">⏩</span>FORWARD 6
+      </button>
+      <button class="strat-btn" data-strat="back">
+        <span class="emoji">⏪</span>BACK 6
+      </button>
+      <button class="strat-btn" data-strat="stay">
+        <span class="emoji">⏸️</span>STAY
+      </button>
+    </div>
+  `);
+  document.querySelectorAll('[data-strat]').forEach(btn => {
+    btn.onclick = () => resolveStrategic(btn.dataset.strat);
+  });
+}
+
+function resolveStrategic(choice) {
+  closeModal();
+  if (choice === 'forward')      moveActive(6);
+  else if (choice === 'back')    moveActive(-6);
+  else /* stay */                { state.phase = 'moving'; renderAll(); later(() => passTurn(), 400); }
+}
+
+function moveActive(delta) {
+  state.phase = 'moving';
+  renderHUD();
+  const team = state.teams[state.activeIdx];
+  const dir = Math.sign(delta);
+  const steps = Math.abs(delta);
+  let step = 0;
+  const hopOnce = () => {
+    if (step >= steps) {
+      // Landed
+      SFX.land();
+      later(() => landOn(team.position), 250);
+      return;
+    }
+    let next = team.position + dir;
+    if (next < 0) next = 0;
+    if (next > BOARD_SPACES.length - 1) next = BOARD_SPACES.length - 1;
+    team.position = next;
+    SFX.hop();
+    renderTokens();
+    step++;
+    if (next === BOARD_SPACES.length - 1 && dir > 0) {
+      // Reached goal — short-circuit
+      later(() => landOn(team.position), 400);
+      return;
+    }
+    later(hopOnce, 350);
+  };
+  hopOnce();
+}
+
+function landOn(pos) {
+  const space = BOARD_SPACES[pos];
+  if (space.type === 'goal') {
+    declareWinner(state.activeIdx);
+    return;
+  }
+  if (space.type === 'question') return openQuestion();
+  if (space.type === 'treasure') return openTreasure();
+  if (space.type === 'minigame') return openMinigame();
+  // start or unknown — just pass
+  passTurn();
+}
+
+// ---- Questions ----
+function openQuestion() {
+  const active = state.teams[state.activeIdx];
+  const bank = QUESTIONS[active.tier];
+  const q = bank[Math.floor(Math.random() * bank.length)];
+  state.currentQuestion = q;
+  state.selectedAnswer = null;
+  state.phase = 'awaiting-answer';
+  renderHUD();
+
+  showCard(`
+    <div class="badge" style="color:${active.color}">${active.mascot} ${active.name} — QUESTION</div>
+    <h1>${escapeHtml(q.q)}</h1>
+    <div class="choices">
+      ${q.a.map((opt, i) => `
+        <button class="choice" data-pick="${i}">
+          <span class="letter">${String.fromCharCode(65+i)}.</span>${escapeHtml(opt)}
+        </button>
+      `).join('')}
+    </div>
+    <div class="card-actions" id="judgment-actions" style="display:none">
+      <button class="cardbtn wrong" id="judge-wrong">WRONG (⌫)</button>
+      <button class="cardbtn" id="judge-correct">CORRECT (↵)</button>
+    </div>
+  `);
+  document.querySelectorAll('[data-pick]').forEach(btn => {
+    btn.onclick = () => pickAnswer(parseInt(btn.dataset.pick));
+  });
+  document.getElementById('judge-correct').onclick = () => judgeAnswer(true);
+  document.getElementById('judge-wrong').onclick   = () => judgeAnswer(false);
+}
+
+function pickAnswer(idx) {
+  if (state.phase !== 'awaiting-answer' && state.phase !== 'awaiting-judgment') return;
+  state.selectedAnswer = idx;
+  document.querySelectorAll('[data-pick]').forEach(btn => {
+    btn.classList.toggle('picked', parseInt(btn.dataset.pick) === idx);
+  });
+  document.getElementById('judgment-actions').style.display = 'flex';
+  state.phase = 'awaiting-judgment';
+  renderHUD();
+  SFX.click();
+}
+
+function judgeAnswer(correct) {
+  if (state.phase !== 'awaiting-judgment') return;
+  const team = state.teams[state.activeIdx];
+  const q = state.currentQuestion;
+  // Highlight the correct/incorrect choices
+  document.querySelectorAll('[data-pick]').forEach(btn => {
+    const i = parseInt(btn.dataset.pick);
+    if (i === q.c) btn.classList.add('correct');
+    if (i === state.selectedAnswer && !correct) btn.classList.add('incorrect');
+  });
+  if (correct) {
+    team.score += 1;
+    SFX.correct();
+    toast(`${team.name} +1 point!`);
+  } else {
+    SFX.wrong();
+    toast(`${team.name} miss — turn lost`);
+  }
+  document.getElementById('judge-correct').disabled = true;
+  document.getElementById('judge-wrong').disabled = true;
+  later(() => {
+    closeModal();
+    passTurn();
+  }, 1500);
+}
+
+// ---- Treasure ----
+function openTreasure() {
+  const team = state.teams[state.activeIdx];
+  const pick = POWERUP_KEYS[Math.floor(Math.random() * POWERUP_KEYS.length)];
+  state.currentTreasure = pick;
+  team.inventory.push(pick);
+  state.phase = 'awaiting-treasure';
+  renderHUD();
+  SFX.treasure();
+  const p = POWERUPS[pick];
+  showCard(`
+    <div class="badge" style="color:${team.color}">${team.mascot} ${team.name} — TREASURE</div>
+    <div class="treasure-icon">${p.icon}</div>
+    <div class="treasure-name">${p.name}</div>
+    <div class="treasure-desc">${escapeHtml(p.desc)}</div>
+    <div class="card-actions">
+      <button class="cardbtn" id="treasure-continue">CONTINUE (SPACE)</button>
+    </div>
+  `);
+  document.getElementById('treasure-continue').onclick = () => {
+    closeModal();
+    passTurn();
+  };
+}
+
+// ---- Mini-game ----
+function openMinigame() {
+  state.phase = 'awaiting-minigame';
+  renderHUD();
+  SFX.minigame();
+  showCard(`
+    <div class="badge">MINI-GAME!</div>
+    <h1>Drawn from the library...</h1>
+    <div id="mg-wheel" class="spinning">${MINIGAME_LIBRARY[0]}</div>
+    <div class="body" id="mg-instructions" style="opacity:0; font-size:24px">
+      Host: play this with the kids. Operator: pick which tribe won.
+    </div>
+    <div class="mg-winners" id="mg-winners" style="display:none">
+      ${state.teams.map((t, i) => `
+        <button class="mg-winner-btn" data-winner="${i}" style="color:${t.color}">
+          ${t.mascot} ${t.name}<br>WINS
+        </button>
+      `).join('')}
+    </div>
+  `);
+  // Spin the wheel
+  const wheel = document.getElementById('mg-wheel');
+  let i = 0;
+  let interval = 80;
+  let elapsed = 0;
+  const totalDuration = 2200;
+  const tick = () => {
+    wheel.textContent = MINIGAME_LIBRARY[i % MINIGAME_LIBRARY.length];
+    i++;
+    elapsed += interval;
+    if (elapsed >= totalDuration) {
+      wheel.classList.remove('spinning');
+      const choice = MINIGAME_LIBRARY[Math.floor(Math.random() * MINIGAME_LIBRARY.length)];
+      wheel.textContent = choice;
+      state.currentMinigame = choice;
+      SFX.land();
+      document.getElementById('mg-instructions').style.opacity = '1';
+      const winners = document.getElementById('mg-winners');
+      winners.style.display = 'grid';
+      winners.querySelectorAll('[data-winner]').forEach(btn => {
+        btn.onclick = () => awardMinigameWinner(parseInt(btn.dataset.winner));
+      });
+      return;
+    }
+    interval *= 1.08;
+    later(tick, interval);
+  };
+  tick();
+}
+
+function awardMinigameWinner(teamIdx) {
+  const winner = state.teams[teamIdx];
+  winner.score += 2;
+  // Award a power-up too
+  const pick = POWERUP_KEYS[Math.floor(Math.random() * POWERUP_KEYS.length)];
+  winner.inventory.push(pick);
+  SFX.treasure();
+  toast(`${winner.mascot} ${winner.name} +2 score and ${POWERUPS[pick].name}!`);
+  closeModal();
+  later(() => passTurn(), 600);
+}
+
+// ---- Powerups ----
+function usePowerup(teamIdx, invIdx) {
+  // Only the active team can use powerups, and only on their own turn while awaiting-roll (or for stumble/shield, more loosely)
+  const team = state.teams[teamIdx];
+  const pid = team.inventory[invIdx];
+  if (!pid) return;
+  // Restrict use: must be the active team's turn and they're at awaiting-roll for most
+  if (teamIdx !== state.activeIdx) {
+    toast(`Wait for ${state.teams[teamIdx].name}'s turn`);
+    return;
+  }
+  if (state.phase !== 'awaiting-roll') {
+    toast(`Can only use powerup before rolling`);
+    return;
+  }
+  snapshot();
+  if (pid === 'shield')   { team.shielded = true; team.inventory.splice(invIdx, 1); toast(`${team.name} ${POWERUPS.shield.icon} Sanctuary up`); SFX.treasure(); renderHUD(); return; }
+  if (pid === 'mulligan') { state.awaitingMulligan = true; team.inventory.splice(invIdx, 1); toast(`${team.name} can re-roll once`); SFX.click(); renderHUD(); return; }
+  if (pid === 'double')   { team.inventory.splice(invIdx, 1); toast(`${team.name} rolling DOUBLE`); doubleRoll(); return; }
+  if (pid === 'stumble')  { team.inventory.splice(invIdx, 1); openStumbleTargetPicker(teamIdx); return; }
+}
+
+function doubleRoll() {
+  state.phase = 'rolling';
+  renderHUD();
+  SFX.roll();
+  const overlay = document.getElementById('dice-overlay');
+  const dice = document.getElementById('dice');
+  overlay.classList.add('show');
+  dice.classList.add('rolling');
+  let ticks = 0;
+  const flicker = setInterval(() => {
+    dice.textContent = 1 + Math.floor(Math.random() * 6);
+    ticks++;
+    if (ticks > 14) {
+      clearInterval(flicker);
+      const r1 = rollD6(state.activeIdx);
+      const r2 = rollD6(state.activeIdx);
+      const total = r1 + r2;
+      dice.textContent = `${r1}+${r2}=${total}`;
+      dice.style.fontSize = '80px';
+      dice.classList.remove('rolling');
+      state.lastRoll = total;
+      later(() => {
+        overlay.classList.remove('show');
+        dice.style.fontSize = '';
+        moveActive(total); // skip the strategic-6 check for double roll, treat as normal move
+      }, 1100);
+    }
+  }, 70);
+}
+
+function openStumbleTargetPicker(byTeamIdx) {
+  const by = state.teams[byTeamIdx];
+  const targets = state.teams.map((t, i) => ({ t, i })).filter(({i}) => i !== byTeamIdx);
+  showCard(`
+    <div class="badge" style="color:${by.color}">${by.mascot} ${by.name} use STUMBLE</div>
+    <h1>Pick a tribe to stumble</h1>
+    <div class="mg-winners">
+      ${targets.map(({t, i}) => `
+        <button class="mg-winner-btn" data-stumble="${i}" style="color:${t.color}">
+          ${t.mascot} ${t.name}
+        </button>
+      `).join('')}
+    </div>
+    <div class="card-actions">
+      <button class="cardbtn neutral" id="stumble-cancel">CANCEL</button>
+    </div>
+  `);
+  document.querySelectorAll('[data-stumble]').forEach(btn => {
+    btn.onclick = () => {
+      const tgt = state.teams[parseInt(btn.dataset.stumble)];
+      if (tgt.shielded) {
+        tgt.shielded = false;
+        toast(`${tgt.name}'s Sanctuary blocked it!`);
+        SFX.land();
+      } else {
+        tgt.skipNext = true;
+        toast(`${tgt.name} will skip their next turn`);
+        SFX.wrong();
+      }
+      closeModal();
+      renderHUD();
+    };
+  });
+  document.getElementById('stumble-cancel').onclick = () => {
+    // Refund the power-up
+    state.teams[byTeamIdx].inventory.push('stumble');
+    closeModal();
+    renderHUD();
+  };
+}
+
+// ---- Turn management ----
+function passTurn() {
+  if (state.won) return;
+  state.activeIdx = (state.activeIdx + 1) % state.teams.length;
+  if (state.activeIdx === 0) state.turn++;
+  state.phase = 'awaiting-roll';
+  state.currentQuestion = null;
+  state.selectedAnswer = null;
+  state.currentTreasure = null;
+  state.currentMinigame = null;
+  state.pendingMove = null;
+  renderAll();
+}
+
+// ---- Victory ----
+function declareWinner(idx) {
+  state.won = true;
+  state.winner = idx;
+  state.phase = 'won';
+  const team = state.teams[idx];
+  SFX.victory();
+  document.getElementById('victory-team').innerHTML = `${team.mascot} ${team.name} WIN!`;
+  document.getElementById('victory-team').style.color = team.color;
+  document.getElementById('victory').classList.add('show');
+  spawnConfetti();
+}
+
+function spawnConfetti() {
+  const victory = document.getElementById('victory');
+  const colors = ['#ffd55a','#ff6b6b','#6abf3c','#4a8fd6','#b34acd'];
+  for (let i = 0; i < 100; i++) {
+    const c = document.createElement('div');
+    c.className = 'confetti';
+    c.style.background = colors[i % colors.length];
+    c.style.left = Math.random() * 100 + '%';
+    c.style.top = '-20px';
+    c.style.transform = `rotate(${Math.random()*360}deg)`;
+    victory.appendChild(c);
+    const dur = 2 + Math.random() * 3;
+    if (typeof c.animate === 'function') {
+      c.animate([
+        { transform: c.style.transform + ' translateY(0)' },
+        { transform: c.style.transform + ` translateY(${window.innerHeight + 100}px) rotate(${720 + Math.random()*360}deg)` }
+      ], { duration: dur * 1000, iterations: Infinity });
+    }
+  }
+}
+
+function resetGame() {
+  cancelPendingTimers();
+  history = [];
+  state = freshState();
+  document.getElementById('victory').classList.remove('show');
+  document.getElementById('victory').querySelectorAll('.confetti').forEach(c => c.remove());
+  closeAllModals();
+  renderAll();
+}
+
+// =====================================================================
+// MODAL HELPERS
+// =====================================================================
+
+function showCard(html) {
+  const modal = document.getElementById('modal');
+  const body = document.getElementById('card-body');
+  body.innerHTML = html;
+  modal.classList.add('show');
+}
+function closeModal() {
+  document.getElementById('modal').classList.remove('show');
+}
+function closeAllModals() {
+  closeModal();
+  document.getElementById('dice-overlay').classList.remove('show');
+}
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg;
+  t.classList.add('show');
+  later(() => t.classList.remove('show'), 1800);
+}
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+// =====================================================================
+// INPUT
+// =====================================================================
+
+function onPrimary() {
+  ensureAudio();
+  switch (state.phase) {
+    case 'awaiting-roll':      return rollDice();
+    case 'awaiting-treasure':  { const btn = document.getElementById('treasure-continue'); if (btn) btn.click(); return; }
+    default: return;
+  }
+}
+
+window.addEventListener('keydown', (e) => {
+  // Ignore typing in inputs (none right now, but defensive)
+  if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+  ensureAudio();
+
+  // Victory overlay shortcut
+  if (state.won) {
+    if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); resetGame(); }
+    return;
+  }
+
+  switch (e.key) {
+    case ' ': e.preventDefault(); onPrimary(); break;
+    case 'Enter':
+      if (state.phase === 'awaiting-judgment') judgeAnswer(true);
+      break;
+    case 'Backspace':
+      if (state.phase === 'awaiting-judgment') judgeAnswer(false);
+      break;
+    case '1': case '2': case '3': case '4': {
+      const idx = parseInt(e.key) - 1;
+      if (state.phase === 'awaiting-answer' || state.phase === 'awaiting-judgment') {
+        if (state.currentQuestion && idx < state.currentQuestion.a.length) pickAnswer(idx);
+      } else if (state.phase === 'awaiting-minigame') {
+        if (idx < state.teams.length) {
+          const btn = document.querySelector(`[data-winner="${idx}"]`);
+          if (btn) btn.click();
+        }
+      }
+      break;
+    }
+    case 'u': case 'U': undo(); break;
+    case 'm': case 'M': toggleMute(); break;
+    case 'f': case 'F': toggleFullscreen(); break;
+    case 'Tab': e.preventDefault(); toggleHUD(); break;
+    case 'q': case 'Q': {
+      // Manual score adjust: -1 for active team
+      snapshot();
+      state.teams[state.activeIdx].score = Math.max(0, state.teams[state.activeIdx].score - 1);
+      toast(`${state.teams[state.activeIdx].name} −1`);
+      renderHUD();
+      break;
+    }
+    case 'w': case 'W': {
+      // Manual score adjust: +1 for active team
+      snapshot();
+      state.teams[state.activeIdx].score += 1;
+      toast(`${state.teams[state.activeIdx].name} +1`);
+      renderHUD();
+      break;
+    }
+    case 'ArrowUp': case 'ArrowDown': case 'ArrowLeft': case 'ArrowRight':
+      // Strategic-6 quick keys: ←=back, →=forward, ↓=stay
+      if (state.phase === 'awaiting-strategic-6') {
+        e.preventDefault();
+        if (e.key === 'ArrowRight') resolveStrategic('forward');
+        else if (e.key === 'ArrowLeft') resolveStrategic('back');
+        else if (e.key === 'ArrowDown') resolveStrategic('stay');
+      }
+      break;
+  }
+});
+
+function toggleFullscreen() {
+  if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(()=>{});
+  else document.exitFullscreen();
+}
+function toggleHUD() {
+  state.hudCompact = !state.hudCompact;
+  document.getElementById('hud').classList.toggle('compact', state.hudCompact);
+}
+
+// =====================================================================
+// STAGE SCALING (1920x1080 logical -> viewport)
+// =====================================================================
+
+function fitStage() {
+  const stage = document.getElementById('stage');
+  const sx = window.innerWidth / 1920;
+  const sy = window.innerHeight / 1080;
+  const s = Math.min(sx, sy);
+  stage.style.transform = `scale(${s})`;
+}
+window.addEventListener('resize', fitStage);
+
+// =====================================================================
+// BOOT
+// =====================================================================
+
+function boot() {
+  fitStage();
+  renderAll();
+  document.getElementById('primary-btn').onclick = onPrimary;
+  document.getElementById('btn-undo').onclick = undo;
+  document.getElementById('btn-mute').onclick = toggleMute;
+  document.getElementById('btn-fs').onclick = toggleFullscreen;
+  document.getElementById('btn-hud').onclick = toggleHUD;
+  document.getElementById('victory-reset').onclick = resetGame;
+
+  // Test/debug handle (no-op in production use; harmless to expose)
+  window.__game = {
+    get state() { return state; },
+    rollDice, pickAnswer, judgeAnswer, resolveStrategic, awardMinigameWinner,
+    usePowerup, undo, resetGame, passTurn,
+    BOARD_SPACES, QUESTIONS, POWERUPS, MINIGAME_LIBRARY,
+  };
+}
+boot();
+</script>
+</body>
+</html>
