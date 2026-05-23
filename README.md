@@ -1,56 +1,92 @@
 # The Great Adventure
 
-A Mario Party-style board game for The Crossroads kids ministry. A
-multi-week quest themed on the Wilderness / Exodus season, played live
-on the kids-room LED screen with a tech-room operator driving the action
-and the children acting as the controller (shouting answers, picking
-moves, etc.).
+A kid-friendly, two-team party board game for The Crossroads kids
+ministry. Played live on the kids-room LED screen — the tech-room
+engineer drives the game; the crowd is the controller. Inspired by
+**Mario Party, Pummel Party, classroom team games, and PowerPoint-style
+live event games**.
 
-## Phase 1 prototype (this branch)
+## How it plays
 
-This is the static, single-HTML-file prototype that proves out the full
-turn loop end-to-end. No persistence yet; everything resets on reload.
+**Red Team 🦊 vs Blue Team 🐬.** Each team takes turns rolling, moving
+along a branching treasure-map board, and earning **Adventure Coins**.
+After 12 turns per team, whoever has the most coins wins.
 
-- 20-space hand-laid board with three space types: Question, Treasure, Mini-game
-- 3 tribes: **Lions** (K-1), **Eagles** (2-3), **Doves** (4-5) — each draws from its own age-tiered question bank
-- Dice 1-6, with a **Strategic 6** prompt (forward 6 / back 6 / stay)
-- 4 power-ups: Double Roll, Stumble, Sanctuary (Shield), Mulligan
-- Subtle rubber-banding for trailing tribes
-- Mini-game spaces spin a wheel and pick from the existing live library (Mirror Mirror, Memory Verse Scramble, Bible Says, Memory Verse Match) — host runs it, operator awards the winner
-- Single contextual primary button (label changes by phase) + MC answer buttons + Undo + Mute
-- Web Audio-synthesized SFX + light background music loop
-- Designed at 1920×1080, auto-scaled to fullscreen
+### Spaces
+- **Coin** 💰 — +5 Adventure Coins (sometimes drops a bonus power-up).
+- **Trivia** ❓ — True/False Bible question. Correct → +3 coins.
+- **Sanctuary** 🛡️ — safe space. Immune from coin loss and traps until
+  the next turn ends.
+- **Mini-game** 🎮 — picker spins, lands on a game. Engineer drives the
+  game start-to-finish; winner gets +10 coins and a power-up.
+
+### Branching paths
+At the **fork tile** the engineer picks the team's path on the kids'
+behalf (KEEP GOING along the outer loop, or TAKE SHORTCUT down through
+the inner path).
+
+### Power-ups
+Drop from coin spaces, trivia wins, and mini-game wins. Used before
+rolling.
+
+| Icon | Name | Effect |
+|---|---|---|
+| ❄️ | Freeze | Opponent skips their next turn. |
+| 🍌 | Banana Trap | Place on any tile (within 10 ahead of opponent). Enemy crossing loses 4 coins. |
+| 💸 | Coin Drop | Opponent loses 5 coins, scattered ahead as pickups. |
+| 🌀 | Warp | Teleport to any non-Sanctuary tile. |
+| ⚡ | Speed Boost | +3 to your next dice roll. |
+
+### Mini-game catalog
+Six games — five host-led, one in-app (Slow Reveal).
+
+1. 🪞 **Mirror Mirror** — teams form a shape with their bodies before
+   the presenter ends the round.
+2. 📖 **Bible Says** — America Says-style fill-in-the-blank.
+3. 🧩 **Memory Verse Match** — match scripture pieces.
+4. 💣 **Bomb Pass** — T/F hot-potato; timer expires → holder loses.
+5. 🖼️ **Slow Reveal** *(in-app)* — a blurred Bible-scene emoji
+   gradually clarifies; teams guess before the reveal completes.
+6. 😆 **Funny Face Challenge** — make the other team laugh.
+
+Every mini-game flows through a fixed 4-step framework: **instructions →
+start gate → in-game → score award**. The engineer drives every
+transition. No auto-advance.
 
 ## Run
 
 Open `index.html` in any modern browser. No build step, no server, no
-dependencies. For the kids-room screen, press `F` once loaded to go
-fullscreen.
+dependencies. Press `F` once loaded to go fullscreen.
 
 ## Operator keys (mirrored on screen)
 
 | Key | Action |
 |---|---|
-| `SPACE` | Primary contextual action (roll / continue) |
-| `1` `2` `3` `4` | Pick answer A/B/C/D (or pick tribe during mini-game) |
+| `SPACE` | Primary contextual action (roll, next, start, end) |
+| `T` / `F` | Pick TRUE / FALSE (trivia) |
 | `↵` Enter | Mark answer correct |
 | `⌫` Backspace | Mark answer wrong |
-| `←` `→` `↓` | Strategic 6: back / forward / stay |
-| `Q` / `W` | −1 / +1 score for active tribe (manual override) |
+| `←` / `→` | Pick branch at fork · reveal more (Slow Reveal) |
+| `1` / `2` | Award mini-game winner — Red / Blue |
+| `Esc` | Cancel a pending power-up pick (warp / trap) |
+| `Q` / `W` | −1 / +1 coin for active team (manual override) |
 | `U` | Undo last action |
 | `M` | Mute / unmute audio |
-| `F` | Toggle fullscreen |
+| `F` | Toggle fullscreen (only outside trivia) |
 | `Tab` | Toggle HUD detail |
+
+Click any power-up chip in the team panel (during that team's
+awaiting-roll phase) to use it.
 
 ## Roadmap
 
-- **Phase 2** — full 50-space board, more space types (Trial, Choice,
-  Story, Sabotage, Sanctuary), localStorage save/load + JSON export
-- **Phase 3** — Admin page for editing question banks and board layout
-  without touching code
-- **Phase 4** — Real mini-game module integration, blessing card
-  meta-collection across the quarter, end-of-season celebration
+- **Phase 2** — three more in-app mini-games (Bomb Pass, Memory Verse
+  Match, Mirror Mirror), 100+ trivia bank with topic tags, sudden-death
+  tie-break, visual coin pickups.
+- **Phase 3** — admin/content editor, custom cartoon sprites, per-zone
+  background art, sampled SFX + ambient music per region, optional
+  intra-session save/resume.
 
-Detailed planning notes live in
-`/root/.claude/plans/build-prompt-the-great-melodic-hamming.md` (local to
-the dev environment).
+Roadmap details: see the dev plan in
+`/root/.claude/plans/build-prompt-the-great-melodic-hamming.md` (local
+to the dev environment).

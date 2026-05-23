@@ -1,5 +1,6 @@
-// Headless smoke test — loads index.html into jsdom, simulates many turns,
-// and verifies no JS errors and that the game reaches a winner.
+// Headless smoke test — loads index.html into jsdom, simulates a full
+// 12-turn game with two teams (Red / Blue), and verifies the game
+// completes without JS errors and produces a coin-based result.
 const fs = require('fs');
 const path = require('path');
 const { JSDOM, VirtualConsole } = require('jsdom');
@@ -10,9 +11,8 @@ const errors = [];
 const vc = new VirtualConsole();
 vc.on('jsdomError', (e) => { errors.push('jsdomError: ' + (e.stack || e.message)); });
 vc.on('error', (msg) => { errors.push('console.error: ' + msg); });
-vc.on('log', (...args) => { console.log('[page]', ...args); });
+vc.on('log', (...args) => console.log('[page]', ...args));
 
-// Stub AudioContext so the audio code paths don't blow up
 const audioStub = function () {
   return {
     currentTime: 0,
@@ -34,66 +34,70 @@ const dom = new JSDOM(html, {
   },
 });
 
-// Wait briefly for boot
 setTimeout(async () => {
   const win = dom.window;
-
-  function assert(cond, msg) {
-    if (!cond) { errors.push('ASSERT FAILED: ' + msg); }
-  }
+  function assert(cond, msg) { if (!cond) errors.push('ASSERT FAILED: ' + msg); }
+  function tick(ms) { return new Promise(r => setTimeout(r, ms)); }
 
   try {
-    // 1. Initial render: 21 tiles, 3 tokens
+    // Initial render sanity
     const tiles = win.document.querySelectorAll('.tile');
     const tokens = win.document.querySelectorAll('.token');
-    assert(tiles.length === 21, `expected 21 tiles, got ${tiles.length}`);
-    assert(tokens.length === 3, `expected 3 tokens, got ${tokens.length}`);
+    assert(tiles.length === 30, `expected 30 tiles, got ${tiles.length}`);
+    assert(tokens.length === 2,  `expected 2 tokens, got ${tokens.length}`);
 
-    // 2. Primary button label
+    // Primary button label
     const pb = win.document.getElementById('primary-btn');
     assert(pb.textContent.includes('ROLL'), `primary should say ROLL, got "${pb.textContent}"`);
 
-    // 3. Simulate many turn cycles: keep clicking primary, picking answers, judging, etc.
-    // We override Math.random so we can control flow a bit
-    let turns = 0;
-    let maxTurns = 200;
-    while (turns < maxTurns) {
+    let safety = 0;
+    while (!win.__game.state.won && safety < 400) {
       const state = win.__game.state;
-      if (state.won) break;
       const phase = state.phase;
+      safety++;
       if (phase === 'awaiting-roll') {
         win.__game.rollDice();
-        // fast-forward all timers
-        await tick(win, 3000);
-      } else if (phase === 'awaiting-strategic-6') {
-        win.__game.resolveStrategic('forward');
-        await tick(win, 5000);
-      } else if (phase === 'awaiting-answer' || phase === 'awaiting-judgment') {
-        win.__game.pickAnswer(state.currentQuestion.c); // pick correct
-        win.__game.judgeAnswer(true);
-        await tick(win, 2000);
-      } else if (phase === 'awaiting-treasure') {
-        const btn = win.document.getElementById('treasure-continue');
+        await tick(2500);
+      } else if (phase === 'awaiting-path-pick') {
+        // Pick the first option (KEEP GOING) via DOM
+        const btn = win.document.querySelector('[data-path]');
         if (btn) btn.click();
-        await tick(win, 1000);
-      } else if (phase === 'awaiting-minigame') {
-        // wait for the wheel to settle then pick a winner
-        await tick(win, 5000);
-        const btn = win.document.querySelector('[data-winner="0"]');
-        if (btn) btn.click();
-        await tick(win, 1500);
+        await tick(500);
+      } else if (phase === 'awaiting-tf' || phase === 'awaiting-judgment') {
+        const correctAnswer = state.currentTrivia.a;
+        win.__game.pickTF(correctAnswer);
+        win.__game.judgeTrivia(true);
+        await tick(2000);
+      } else if (phase === 'mg-instructions') {
+        const b = win.document.getElementById('mg-next-1');
+        if (b) b.click();
+        await tick(400);
+      } else if (phase === 'mg-start-gate') {
+        const b = win.document.getElementById('mg-start');
+        if (b) b.click();
+        await tick(400);
+      } else if (phase === 'mg-in-game') {
+        // Hit the end button for both Slow Reveal and host-led placeholder
+        const end = win.document.getElementById('sr-end') || win.document.getElementById('mg-end');
+        if (end) end.click();
+        await tick(400);
+      } else if (phase === 'mg-score-award') {
+        const winnerBtn = win.document.querySelector('[data-winner="0"]');
+        if (winnerBtn) winnerBtn.click();
+        await tick(1500);
       } else if (phase === 'rolling' || phase === 'moving' || phase === 'resolving') {
-        await tick(win, 2000);
+        await tick(800);
       } else {
-        // unknown phase — fast-forward
-        await tick(win, 500);
+        await tick(300);
       }
-      turns++;
     }
 
-    assert(win.__game.state.won, `game should have produced a winner within ${maxTurns} action cycles, ended in phase=${win.__game.state.phase}, positions=${JSON.stringify(win.__game.state.teams.map(t=>t.position))}`);
-    if (win.__game.state.won) {
-      console.log(`✓ Winner: ${win.__game.state.teams[win.__game.state.winner].name} after ${win.__game.state.turn} turns`);
+    const s = win.__game.state;
+    assert(s.won, `game should end within 400 cycles (ended in phase=${s.phase}, turn=${s.turn})`);
+    if (s.won) {
+      const [red, blue] = s.teams;
+      const winnerName = s.winner === -1 ? 'TIE' : s.teams[s.winner].name;
+      console.log(`✓ Result after turn ${s.turn}: Red ${red.coins} vs Blue ${blue.coins} → ${winnerName}`);
     }
 
     if (errors.length) {
@@ -109,8 +113,3 @@ setTimeout(async () => {
     process.exit(1);
   }
 }, 200);
-
-function tick(win, ms) {
-  // jsdom uses real timers, so just await
-  return new Promise(r => setTimeout(r, ms));
-}

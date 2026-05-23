@@ -2,12 +2,12 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8">
-<title>The Great Adventure — Phase 1</title>
+<title>The Great Adventure</title>
 <style>
   /* ===== RESET / BASE ===== */
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { width: 100%; height: 100%; overflow: hidden; background: #0b1220; color: #f4ead5; font-family: 'Courier New', monospace; }
-  img, canvas { image-rendering: pixelated; image-rendering: crisp-edges; }
+  html, body { width: 100%; height: 100%; overflow: hidden; background: #0b0a08; color: #f4ead5; font-family: 'Courier New', monospace; }
+  img, canvas, svg { image-rendering: pixelated; image-rendering: crisp-edges; }
 
   /* ===== STAGE — fixed 1920x1080 scaled to viewport ===== */
   #stage-wrap { position: fixed; inset: 0; display: grid; place-items: center; background: #000; }
@@ -15,105 +15,171 @@
     position: relative;
     width: 1920px; height: 1080px;
     transform-origin: center center;
-    background: linear-gradient(180deg, #d9a86b 0%, #c08850 40%, #8a5a2c 75%, #5a3a1c 100%);
+    /* Parchment / treasure-map backdrop */
+    background:
+      radial-gradient(ellipse at 30% 25%, #f9e4a2 0%, transparent 55%),
+      radial-gradient(ellipse at 80% 70%, #f0c87a 0%, transparent 50%),
+      linear-gradient(180deg, #e7c578 0%, #d8a64c 45%, #b97a2f 100%);
     overflow: hidden;
   }
+  /* parchment texture spots */
+  #stage::before {
+    content: ''; position: absolute; inset: 0;
+    background:
+      radial-gradient(circle at 12% 60%, #00000020 0 8px, transparent 9px),
+      radial-gradient(circle at 88% 35%, #00000015 0 14px, transparent 16px),
+      radial-gradient(circle at 50% 90%, #00000010 0 22px, transparent 24px),
+      radial-gradient(circle at 22% 18%, #00000008 0 30px, transparent 32px);
+    pointer-events: none;
+  }
 
-  /* ===== SKY / DECOR ===== */
-  .sun { position: absolute; left: 1620px; top: 80px; width: 120px; height: 120px; background: #ffd55a; border-radius: 50%; box-shadow: 0 0 80px 30px #ffb02e80; }
-  .dune { position: absolute; bottom: 0; height: 240px; border-radius: 50% 50% 0 0 / 100% 100% 0 0; opacity: .55; }
-  .dune.d1 { left: -120px; width: 900px; background: #6b4220; }
-  .dune.d2 { left: 700px; width: 1100px; background: #7a4d28; }
-  .dune.d3 { left: 1500px; width: 700px; background: #6b4220; }
+  /* ===== DECOR ===== */
+  .deco { position: absolute; pointer-events: none; }
+  .cave { left: 60px; top: 460px; font-size: 100px; filter: drop-shadow(0 6px 0 #0008); }
+  .palm-l { left: 30px; top: 60px; font-size: 90px; transform: rotate(-12deg); }
+  .palm-r { right: 80px; top: 60px; font-size: 90px; transform: rotate(12deg); }
+  .x-mark { right: 110px; bottom: 280px; font-size: 80px; color: #c0392b; font-weight: bold; text-shadow: 0 4px 0 #2a1808; }
+  .compass { left: 60px; bottom: 280px; font-size: 100px; opacity: .8; }
+
+  /* ===== SVG PATH LAYER ===== */
+  #paths { position: absolute; inset: 0; pointer-events: none; }
+  .path-line { stroke: #5a2e10; stroke-width: 8; stroke-dasharray: 18 14; fill: none; opacity: .55; }
+  .path-line.shortcut { stroke: #8b3a0e; stroke-dasharray: 12 10; opacity: .65; }
 
   /* ===== BOARD TILES ===== */
   .tile {
     position: absolute;
-    width: 130px; height: 130px;
-    border: 5px solid #2a1808;
-    border-radius: 16px;
+    width: 110px; height: 110px;
+    border: 6px solid #2a1808;
+    border-radius: 22px;
     display: grid; place-items: center;
-    font-size: 56px;
-    box-shadow: 0 8px 0 #2a1808, inset 0 0 0 4px #f4ead555;
-    transition: transform .15s;
+    font-size: 50px;
+    box-shadow: 0 8px 0 #2a1808, inset 0 0 0 4px #f4ead588, inset 0 -8px 18px #00000040;
+    transform: translate(-55px, -55px);
+    background: #c9a868;
+    transition: transform .15s, box-shadow .15s, filter .15s;
   }
-  .tile .num { position: absolute; top: 2px; left: 8px; font-size: 18px; color: #2a1808; font-weight: bold; text-shadow: 0 0 3px #fff8; }
-  .tile.start    { background: #6abf3c; }
-  .tile.goal     { background: linear-gradient(135deg, #ffd55a, #ff9c2a); animation: goalPulse 1.4s ease-in-out infinite; }
-  .tile.question { background: #4a8fd6; }
-  .tile.treasure { background: #d9b34a; }
-  .tile.minigame { background: #b34acd; }
-  .tile.highlight { transform: scale(1.12); filter: brightness(1.3); }
-  @keyframes goalPulse { 0%,100%{ filter: brightness(1); } 50%{ filter: brightness(1.4); } }
+  .tile .lbl { position: absolute; top: -2px; left: 6px; font-size: 14px; color: #2a1808; font-weight: bold; opacity: .55; }
+  .tile.start    { background: linear-gradient(180deg, #7ed957, #4a9c2c); color: #fff; }
+  .tile.coin     { background: linear-gradient(180deg, #ffd55a, #e89c1e); }
+  .tile.trivia   { background: linear-gradient(180deg, #6bb8ff, #3060d8); color: #fff; }
+  .tile.sanctuary{ background: linear-gradient(180deg, #c9e8ff, #80b0e0); }
+  .tile.minigame { background: linear-gradient(180deg, #d997ff, #8e3acd); color: #fff; }
+  .tile.shortcut-tile { background: linear-gradient(180deg, #ffcb8c, #d97a2c); }
+  .tile.highlight { transform: translate(-55px, -55px) scale(1.15); filter: brightness(1.3); z-index: 5; }
+  .tile.warp-target { cursor: pointer; }
+  .tile.warp-target:hover { transform: translate(-55px, -55px) scale(1.12); filter: brightness(1.25); box-shadow: 0 8px 0 #2a1808, 0 0 32px #fff; }
+  .tile.warp-disabled { filter: grayscale(.7) brightness(.6); pointer-events: none; }
+  .tile.trap-pick { cursor: pointer; outline: 4px dashed #ffd55a; outline-offset: 4px; }
+  .tile .overlay {
+    position: absolute; top: -22px; right: -14px;
+    font-size: 50px;
+    filter: drop-shadow(0 3px 0 #2a1808);
+    animation: bobble 1.4s ease-in-out infinite;
+  }
+  .tile .pickup {
+    position: absolute; bottom: -16px; left: 50%; transform: translateX(-50%);
+    font-size: 30px;
+    filter: drop-shadow(0 2px 0 #2a1808);
+    animation: spinCoin 1.6s ease-in-out infinite;
+  }
+  @keyframes bobble { 0%,100%{ transform: translateY(0); } 50%{ transform: translateY(-6px); } }
+  @keyframes spinCoin { 0%,100%{ transform: translateX(-50%) scaleX(1); } 50%{ transform: translateX(-50%) scaleX(0.3); } }
+
+  .tile.coin::after {
+    content: ''; position: absolute; inset: -8px; border-radius: 26px;
+    background: radial-gradient(circle, #fff8 0%, transparent 60%);
+    animation: shimmer 2.4s ease-in-out infinite;
+    pointer-events: none;
+  }
+  @keyframes shimmer { 0%,100%{ opacity: .3; } 50%{ opacity: .8; } }
 
   /* ===== TEAM TOKENS ===== */
   .token {
     position: absolute;
     width: 90px; height: 90px;
     display: grid; place-items: center;
-    font-size: 68px;
-    transition: transform .35s cubic-bezier(.4,1.6,.6,1);
+    font-size: 64px;
+    transform: translate(-45px, -45px);
+    transition: left .35s cubic-bezier(.4,1.6,.6,1), top .35s cubic-bezier(.4,1.6,.6,1);
     pointer-events: none;
     filter: drop-shadow(0 4px 0 #00000080);
     z-index: 10;
   }
   .token.active { animation: bounce 0.6s ease-in-out infinite; }
   @keyframes bounce { 0%,100%{ translate: 0 0; } 50%{ translate: 0 -12px; } }
-  .token-ring {
-    position: absolute; width: 90px; height: 90px;
-    border-radius: 50%; border: 6px solid currentColor;
-    box-shadow: 0 0 24px currentColor;
-    animation: ring 1.2s ease-in-out infinite;
+  .token-flag {
+    position: absolute; left: 50%; top: -18px; transform: translateX(-50%);
+    width: 24px; height: 24px; border-radius: 50%;
+    border: 3px solid #2a1808;
+    box-shadow: 0 2px 0 #2a1808;
   }
-  @keyframes ring { 0%,100%{ transform: scale(1); opacity: 1; } 50%{ transform: scale(1.18); opacity: .4; } }
 
   /* ===== HUD (bottom strip) ===== */
   #hud {
     position: absolute; left: 0; right: 0; bottom: 0;
     height: 220px;
-    background: linear-gradient(180deg, #1a1208ee, #0b0804f0);
+    background: linear-gradient(180deg, #2a1808ee, #0b0804f0);
     border-top: 6px solid #f4ead5;
     display: grid;
-    grid-template-columns: 360px 1fr 1fr 1fr 280px;
+    grid-template-columns: 320px 1fr 1fr 320px;
     gap: 16px;
     padding: 16px 24px;
     z-index: 50;
   }
-  #hud.compact { height: 90px; padding: 8px 24px; }
+  #hud.compact { height: 110px; padding: 8px 24px; }
   .panel {
     background: #2a1808;
     border: 4px solid #f4ead5;
     border-radius: 12px;
-    padding: 10px 14px;
+    padding: 12px 16px;
     color: #f4ead5;
     display: flex; flex-direction: column;
     overflow: hidden;
   }
   .panel h3 { font-size: 22px; margin-bottom: 6px; letter-spacing: 1px; }
-  .panel .row { display: flex; gap: 8px; align-items: center; font-size: 18px; }
-  .panel.team { border-width: 6px; }
+  #turn-panel .turn-counter {
+    font-size: 64px; font-weight: bold; color: #ffd55a; line-height: 1;
+    text-shadow: 0 3px 0 #2a1808, 0 0 16px #ffd55a80;
+  }
+  #turn-panel .turn-counter .of { font-size: 36px; color: #f4ead5; opacity: .65; }
+  #turn-panel .turn-active { font-size: 22px; margin-top: 8px; }
+  #turn-panel .phase { font-size: 16px; opacity: .8; margin-top: auto; }
+
+  .panel.team { border-width: 8px; }
   .panel.team.active { box-shadow: 0 0 32px currentColor, inset 0 0 16px currentColor; }
-  .panel.team .name { font-size: 26px; font-weight: bold; display: flex; align-items: center; gap: 8px; }
-  .panel.team .stats { display: flex; gap: 16px; font-size: 18px; margin-top: 4px; }
-  .panel.team .inv { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px; }
+  .panel.team .row1 { display: flex; align-items: center; gap: 14px; }
+  .panel.team .mascot { font-size: 64px; filter: drop-shadow(0 3px 0 #2a1808); }
+  .panel.team .name { font-size: 30px; font-weight: bold; letter-spacing: 1px; }
+  .panel.team .flags { font-size: 28px; margin-left: auto; }
+  .panel.team .coins {
+    font-size: 56px; font-weight: bold; color: #ffd55a;
+    text-shadow: 0 3px 0 #2a1808;
+    margin: 4px 0;
+  }
+  .panel.team .coins .lbl-suffix { font-size: 22px; color: #f4ead5; opacity: .7; margin-left: 8px; }
+  .panel.team .inv { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px; }
   .powerchip {
     background: #f4ead5; color: #2a1808;
     border: 2px solid #2a1808; border-radius: 6px;
-    padding: 2px 8px; font-size: 14px; font-weight: bold;
+    padding: 3px 8px; font-size: 14px; font-weight: bold;
     cursor: pointer;
+    font-family: inherit;
   }
   .powerchip:hover { background: #ffd55a; }
+  .powerchip:disabled { opacity: .4; cursor: not-allowed; }
 
   /* ===== PRIMARY ACTION + CONTROLS ===== */
   #controls { display: flex; flex-direction: column; gap: 8px; }
   #primary-btn {
     flex: 1;
     background: #6abf3c; color: #0b1220;
-    font-family: inherit; font-size: 38px; font-weight: bold;
+    font-family: inherit; font-size: 32px; font-weight: bold;
     border: 5px solid #f4ead5; border-radius: 12px;
     cursor: pointer; letter-spacing: 2px;
     box-shadow: 0 6px 0 #2a1808;
     transition: transform .08s, box-shadow .08s;
+    padding: 6px;
   }
   #primary-btn:hover { filter: brightness(1.1); }
   #primary-btn:active { transform: translateY(4px); box-shadow: 0 2px 0 #2a1808; }
@@ -122,7 +188,7 @@
   .smallbtn {
     background: #4a3a20; color: #f4ead5;
     border: 3px solid #f4ead5; border-radius: 8px;
-    padding: 6px 10px; font-family: inherit; font-size: 14px;
+    padding: 6px 8px; font-family: inherit; font-size: 13px;
     cursor: pointer; flex: 1;
   }
   .smallbtn:hover { background: #6a5a40; }
@@ -131,7 +197,7 @@
   #dice-overlay {
     position: absolute; inset: 0;
     display: none; place-items: center;
-    background: #0b122080;
+    background: #0b1220a0;
     z-index: 100;
   }
   #dice-overlay.show { display: grid; }
@@ -151,6 +217,7 @@
     75% { transform: rotate(10deg) translate(3px, -2px); }
     100% { transform: rotate(-12deg) translate(-4px, 2px); }
   }
+  #dice-boost { margin-top: 16px; font-size: 28px; color: #ffd55a; text-shadow: 0 2px 0 #2a1808; }
 
   /* ===== MODAL ===== */
   #modal {
@@ -161,79 +228,115 @@
   }
   #modal.show { display: grid; }
   .card {
-    width: 1200px; max-height: 740px;
+    width: 1200px; max-width: 90%; max-height: 740px;
     background: linear-gradient(180deg, #f4ead5, #d9c89a);
     color: #2a1808;
     border: 8px solid #2a1808;
     border-radius: 24px;
-    padding: 36px 48px;
+    padding: 32px 44px;
     box-shadow: 0 20px 0 #2a1808;
-    display: flex; flex-direction: column; gap: 24px;
+    display: flex; flex-direction: column; gap: 20px;
   }
   .card .badge { font-size: 22px; letter-spacing: 4px; opacity: .7; }
   .card h1 { font-size: 56px; line-height: 1.1; }
-  .card .body { font-size: 32px; line-height: 1.3; flex: 1; }
-  .choices { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
-  .choice {
+  .card .body { font-size: 30px; line-height: 1.3; flex: 1; }
+
+  /* Trivia T/F choices */
+  .tf-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .tf-choice {
     background: #fffaee; color: #2a1808;
-    border: 5px solid #2a1808; border-radius: 12px;
-    padding: 16px 20px; font-family: inherit; font-size: 28px;
-    cursor: pointer; text-align: left;
+    border: 6px solid #2a1808; border-radius: 16px;
+    padding: 28px; font-family: inherit; font-size: 64px; font-weight: bold;
+    cursor: pointer; text-align: center;
     transition: transform .08s;
+    box-shadow: 0 6px 0 #2a1808;
   }
-  .choice .letter { font-weight: bold; font-size: 36px; color: #b34acd; margin-right: 12px; }
-  .choice:hover { background: #ffd55a; }
-  .choice.picked { background: #ffd55a; transform: scale(1.02); }
-  .choice.correct { background: #6abf3c; color: #fff; }
-  .choice.incorrect { background: #d64a4a; color: #fff; }
+  .tf-choice:hover { background: #ffd55a; transform: scale(1.02); }
+  .tf-choice.picked { background: #ffd55a; transform: scale(1.05); }
+  .tf-choice.correct { background: #6abf3c; color: #fff; }
+  .tf-choice.incorrect { background: #d64a4a; color: #fff; }
+  .tf-choice .letter { font-size: 36px; opacity: .7; display: block; margin-bottom: 4px; }
+
   .card-actions { display: flex; gap: 16px; justify-content: flex-end; }
   .cardbtn {
     background: #6abf3c; color: #fff;
     border: 5px solid #2a1808; border-radius: 12px;
-    padding: 14px 32px; font-family: inherit; font-size: 26px; font-weight: bold;
+    padding: 14px 28px; font-family: inherit; font-size: 24px; font-weight: bold;
     cursor: pointer;
     box-shadow: 0 6px 0 #2a1808;
   }
   .cardbtn.wrong { background: #d64a4a; }
   .cardbtn.neutral { background: #6a5a40; }
+  .cardbtn.big { font-size: 36px; padding: 22px 48px; }
   .cardbtn:active { transform: translateY(3px); box-shadow: 0 3px 0 #2a1808; }
   .cardbtn:disabled { opacity: .4; cursor: not-allowed; }
 
-  /* ===== STRATEGIC 6 CARD ===== */
-  .strategic-choices { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 20px; }
-  .strat-btn {
-    background: #fffaee; border: 5px solid #2a1808; border-radius: 16px;
-    padding: 24px; font-family: inherit; font-size: 30px; font-weight: bold;
-    cursor: pointer; color: #2a1808;
+  /* Path-choice modal */
+  .path-choices { display: grid; grid-template-columns: 1fr 1fr; gap: 24px; }
+  .path-btn {
+    background: #fffaee; color: #2a1808;
+    border: 6px solid #2a1808; border-radius: 16px;
+    padding: 24px; font-family: inherit; font-size: 28px; font-weight: bold;
+    cursor: pointer;
     box-shadow: 0 6px 0 #2a1808;
   }
-  .strat-btn .emoji { font-size: 80px; display: block; margin-bottom: 12px; }
-  .strat-btn:hover { background: #ffd55a; }
-  .strat-btn:active { transform: translateY(3px); box-shadow: 0 3px 0 #2a1808; }
+  .path-btn .arrow { display: block; font-size: 80px; margin-bottom: 12px; }
+  .path-btn .tile-type { font-size: 20px; opacity: .7; margin-top: 8px; }
+  .path-btn:hover { background: #ffd55a; }
+  .path-btn:active { transform: translateY(3px); box-shadow: 0 3px 0 #2a1808; }
 
-  /* ===== TREASURE CARD ===== */
-  .treasure-icon { font-size: 180px; text-align: center; }
-  .treasure-name { font-size: 64px; text-align: center; font-weight: bold; color: #b34acd; }
-  .treasure-desc { font-size: 28px; text-align: center; }
+  /* Power-up cards */
+  .powerup-icon { font-size: 180px; text-align: center; }
+  .powerup-name { font-size: 60px; text-align: center; font-weight: bold; color: #8e3acd; }
+  .powerup-desc { font-size: 26px; text-align: center; }
 
-  /* ===== MINIGAME CARD ===== */
+  /* Mini-game framework */
+  .mg-card { gap: 16px; }
+  .mg-icon { font-size: 140px; text-align: center; line-height: 1; }
+  .mg-name { font-size: 56px; text-align: center; font-weight: bold; color: #8e3acd; }
+  .mg-blurb { font-size: 28px; text-align: center; }
+  .mg-step { font-size: 18px; opacity: .6; text-align: center; letter-spacing: 3px; }
+  .mg-host-notice {
+    background: #2a1808; color: #ffd55a;
+    border-radius: 12px; padding: 24px; font-size: 26px; text-align: center;
+    line-height: 1.4;
+  }
+  .winner-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
+  .winner-btn {
+    background: #fffaee; border: 5px solid currentColor; border-radius: 12px;
+    padding: 20px; font-family: inherit; font-size: 28px; font-weight: bold;
+    cursor: pointer; color: #2a1808;
+  }
+  .winner-btn .mascot { font-size: 60px; display: block; }
+
+  /* Slow Reveal */
+  #sr-stage {
+    background: #0b0a08; border-radius: 16px; padding: 32px;
+    min-height: 380px; display: grid; place-items: center;
+    overflow: hidden;
+  }
+  #sr-emoji {
+    font-size: 240px; filter: blur(40px);
+    transition: filter .4s;
+  }
+  #sr-caption {
+    font-size: 32px; text-align: center; min-height: 40px;
+    color: #ffd55a; font-weight: bold;
+  }
+  #sr-controls { display: flex; gap: 12px; justify-content: center; }
+
+  /* Picker wheel */
   #mg-wheel {
     background: #2a1808; color: #ffd55a;
     border: 5px solid #2a1808; border-radius: 16px;
-    padding: 24px; font-size: 64px; text-align: center; font-weight: bold;
+    padding: 24px; font-size: 56px; text-align: center; font-weight: bold;
     min-height: 130px; display: grid; place-items: center;
   }
   #mg-wheel.spinning { animation: wheelFlash .12s linear infinite; }
   @keyframes wheelFlash {
     0% { background: #2a1808; color: #ffd55a; }
-    50% { background: #b34acd; color: #fff; }
+    50% { background: #8e3acd; color: #fff; }
     100% { background: #2a1808; color: #ffd55a; }
-  }
-  .mg-winners { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; }
-  .mg-winner-btn {
-    background: #fffaee; border: 5px solid currentColor; border-radius: 12px;
-    padding: 16px; font-family: inherit; font-size: 28px; font-weight: bold;
-    cursor: pointer; color: #2a1808;
   }
 
   /* ===== VICTORY ===== */
@@ -242,75 +345,98 @@
     display: none; place-items: center;
     background: #0b1220e8;
     z-index: 95; flex-direction: column;
+    gap: 12px;
   }
   #victory.show { display: flex; }
+  #victory .trophy { font-size: 200px; animation: victoryBounce 1.2s ease-in-out infinite; }
   #victory h1 {
-    font-size: 140px; color: #ffd55a;
-    text-shadow: 0 6px 0 #2a1808, 0 0 60px #ffd55a;
-    animation: victoryBounce 1.2s ease-in-out infinite;
+    font-size: 100px;
+    text-shadow: 0 6px 0 #2a1808, 0 0 60px currentColor;
   }
-  #victory h2 { font-size: 80px; color: #f4ead5; margin: 20px 0; }
-  #victory .trophy { font-size: 240px; }
+  #victory h2 { font-size: 56px; color: #f4ead5; }
+  #victory .scores {
+    display: flex; gap: 80px; margin: 20px 0; font-size: 56px;
+  }
+  #victory .scores .score-item { text-align: center; }
+  #victory .scores .label { font-size: 28px; opacity: .8; }
+  #victory .scores .num { font-size: 80px; font-weight: bold; }
   @keyframes victoryBounce { 0%,100% { transform: scale(1); } 50% { transform: scale(1.06); } }
-  .confetti {
-    position: absolute; width: 16px; height: 16px;
-    pointer-events: none;
-  }
+  .confetti { position: absolute; width: 16px; height: 16px; pointer-events: none; }
 
   /* ===== TOAST ===== */
   #toast {
-    position: absolute; top: 24px; left: 50%; transform: translateX(-50%);
+    position: absolute; top: 80px; left: 50%; transform: translateX(-50%);
     background: #2a1808; color: #f4ead5;
     border: 4px solid #f4ead5; border-radius: 12px;
     padding: 14px 28px; font-size: 24px;
     z-index: 200; opacity: 0; pointer-events: none;
     transition: opacity .3s;
+    max-width: 80%; text-align: center;
   }
   #toast.show { opacity: 1; }
 
-  /* ===== KEYHINTS ===== */
+  /* ===== KEY HINTS ===== */
   #keyhints {
-    position: absolute; top: 16px; left: 16px;
-    background: #2a1808a0; color: #f4ead5;
+    position: absolute; top: 16px; right: 16px;
+    background: #2a1808d0; color: #f4ead5;
     border: 2px solid #f4ead5; border-radius: 8px;
-    padding: 8px 14px; font-size: 14px;
-    z-index: 40; line-height: 1.5;
+    padding: 8px 14px; font-size: 13px;
+    z-index: 40; line-height: 1.6;
+    max-width: 280px;
   }
-  kbd { background: #f4ead5; color: #2a1808; padding: 1px 6px; border-radius: 3px; font-weight: bold; }
+  kbd { background: #f4ead5; color: #2a1808; padding: 1px 6px; border-radius: 3px; font-weight: bold; font-size: 12px; }
+
+  /* Title banner */
+  #title {
+    position: absolute; top: 14px; left: 14px;
+    background: #2a1808; color: #ffd55a;
+    border: 3px solid #f4ead5; border-radius: 10px;
+    padding: 8px 16px; font-size: 22px; font-weight: bold;
+    letter-spacing: 3px; z-index: 40;
+    text-shadow: 0 2px 0 #5a2e10;
+  }
 </style>
 </head>
 <body>
 <div id="stage-wrap"><div id="stage">
 
   <!-- Decor -->
-  <div class="sun"></div>
-  <div class="dune d1"></div>
-  <div class="dune d2"></div>
-  <div class="dune d3"></div>
+  <div class="deco palm-l">🌴</div>
+  <div class="deco palm-r">🌴</div>
+  <div class="deco cave">🕳️</div>
+  <div class="deco x-mark">X</div>
+  <div class="deco compass">🧭</div>
 
-  <!-- Board tiles + tokens go here, populated by JS -->
-  <div id="board"></div>
-  <div id="tokens"></div>
+  <!-- Title -->
+  <div id="title">⚓ THE GREAT ADVENTURE ⚓</div>
 
   <!-- Key hints -->
   <div id="keyhints">
-    <b>KEYS</b> &nbsp;
-    <kbd>SPACE</kbd> primary &nbsp;
-    <kbd>1-4</kbd> answer / pick &nbsp;
-    <kbd>↵</kbd> correct &nbsp;
-    <kbd>⌫</kbd> wrong &nbsp;
-    <kbd>U</kbd> undo &nbsp;
-    <kbd>M</kbd> mute &nbsp;
-    <kbd>F</kbd> fullscreen &nbsp;
-    <kbd>Tab</kbd> HUD
+    <b>KEYS</b><br>
+    <kbd>SPACE</kbd> primary &nbsp; <kbd>T</kbd>/<kbd>F</kbd> true/false<br>
+    <kbd>↵</kbd> correct &nbsp; <kbd>⌫</kbd> wrong<br>
+    <kbd>←</kbd>/<kbd>→</kbd> pick / reveal<br>
+    <kbd>1</kbd>/<kbd>2</kbd> winner Red/Blue<br>
+    <kbd>Q</kbd>/<kbd>W</kbd> ±1 coin &nbsp; <kbd>U</kbd> undo<br>
+    <kbd>M</kbd> mute &nbsp; <kbd>F</kbd> fullscreen
   </div>
+
+  <!-- SVG path-lines -->
+  <svg id="paths" viewBox="0 0 1920 1080" preserveAspectRatio="none"></svg>
+
+  <!-- Board tiles + tokens -->
+  <div id="board"></div>
+  <div id="tokens"></div>
 
   <!-- Toast -->
   <div id="toast"></div>
 
   <!-- Dice overlay -->
   <div id="dice-overlay">
-    <div id="dice">?</div>
+    <div style="text-align:center">
+      <div id="dice">?</div>
+      <div id="dice-boost"></div>
+    </div>
   </div>
 
   <!-- Modal -->
@@ -318,26 +444,29 @@
     <div class="card" id="card-body"></div>
   </div>
 
-  <!-- Victory overlay -->
+  <!-- Victory -->
   <div id="victory">
     <div class="trophy">🏆</div>
     <h1 id="victory-team">WINNER!</h1>
-    <h2>The Great Adventure</h2>
-    <button class="cardbtn" id="victory-reset">PLAY AGAIN</button>
+    <h2 id="victory-sub">The Great Adventure</h2>
+    <div class="scores">
+      <div class="score-item"><div class="label">🦊 RED</div><div class="num" id="victory-red">0</div></div>
+      <div class="score-item"><div class="label">🐬 BLUE</div><div class="num" id="victory-blue">0</div></div>
+    </div>
+    <button class="cardbtn big" id="victory-reset">PLAY AGAIN</button>
   </div>
 
   <!-- HUD -->
   <div id="hud">
     <div class="panel" id="turn-panel">
       <h3>TURN</h3>
-      <div class="row" id="turn-text">Turn 1 — Lions</div>
-      <div class="row" id="phase-text">Awaiting roll</div>
-      <div class="row" style="margin-top:auto;font-size:14px;opacity:.7">The Great Adventure · Wilderness</div>
+      <div><span class="turn-counter" id="turn-num">1</span><span class="turn-counter of"> / 12</span></div>
+      <div class="turn-active" id="turn-active">RED TEAM's turn</div>
+      <div class="phase" id="phase-text">Awaiting roll</div>
     </div>
 
     <div class="panel team" id="team-0"></div>
     <div class="panel team" id="team-1"></div>
-    <div class="panel team" id="team-2"></div>
 
     <div id="controls">
       <button id="primary-btn">ROLL</button>
@@ -361,128 +490,167 @@
 // CONSTANTS & CONFIG
 // =====================================================================
 
-const BOARD_SPACES = [
-  // Index 0 is START. Coordinates target stage 1920x1080, tile size 130.
-  { type: 'start',    x: 100,  y: 320 },
-  // Top row (left to right) — winding from start
-  { type: 'question', x: 270,  y: 320 },
-  { type: 'question', x: 440,  y: 320 },
-  { type: 'treasure', x: 610,  y: 320 },
-  { type: 'question', x: 780,  y: 320 },
-  { type: 'minigame', x: 950,  y: 320 },
-  { type: 'question', x: 1120, y: 320 },
-  { type: 'question', x: 1290, y: 320 },
-  // Curve down
-  { type: 'treasure', x: 1460, y: 320 },
-  { type: 'question', x: 1600, y: 420 },
-  // Middle row (right to left)
-  { type: 'question', x: 1460, y: 540 },
-  { type: 'minigame', x: 1290, y: 540 },
-  { type: 'question', x: 1120, y: 540 },
-  { type: 'question', x: 950,  y: 540 },
-  { type: 'treasure', x: 780,  y: 540 },
-  { type: 'question', x: 610,  y: 540 },
-  // Curve down
-  { type: 'question', x: 440,  y: 540 },
-  { type: 'question', x: 300,  y: 640 },
-  // Bottom row (left to right)
-  { type: 'minigame', x: 440,  y: 760 },
-  { type: 'question', x: 610,  y: 760 },
-  { type: 'goal',     x: 800,  y: 760 },
-];
-// Total path length: BOARD_SPACES.length - 1 = 20 spaces to traverse from start to goal.
+const TURN_LIMIT = 12; // turns per team
 
-const TEAMS = [
-  { id: 'lions',  name: 'LIONS',  mascot: '🦁', color: '#d97706', tier: 'lions'  },
-  { id: 'eagles', name: 'EAGLES', mascot: '🦅', color: '#b94a1c', tier: 'eagles' },
-  { id: 'doves',  name: 'DOVES',  mascot: '🕊️',  color: '#e8e6dc', tier: 'doves'  },
+const COIN_REWARD = 5;       // landing on a coin tile
+const TRIVIA_REWARD = 3;     // correct trivia
+const MINIGAME_REWARD = 10;  // winning a mini-game
+const TRAP_PENALTY = 4;      // banana trap penalty
+const COIN_DROP_LOSS = 5;    // coins stolen by Coin Drop
+const COIN_DROP_PICKUPS = 5; // pickup tiles spawned
+
+// Random chance to earn a power-up alongside other rewards
+const POWERUP_CHANCE_COIN = 0.30;     // 30% on coin-space landing
+const POWERUP_CHANCE_TRIVIA = 0.25;   // 25% on trivia correct
+const POWERUP_CHANCE_MINIGAME = 1.0;  // 100% on mini-game win
+
+const TEAMS_INIT = [
+  { id: 'red',  name: 'RED TEAM',  mascot: '🦊', color: '#e84a3a' },
+  { id: 'blue', name: 'BLUE TEAM', mascot: '🐬', color: '#3a8aff' },
 ];
 
 const POWERUPS = {
-  double:  { id: 'double',   name: 'Double Roll', icon: '🎲🎲', desc: 'Roll twice and take the sum on your next turn.' },
-  stumble: { id: 'stumble',  name: 'Stumble',     icon: '💨',    desc: 'Pick another team. They lose their next turn.' },
-  shield:  { id: 'shield',   name: 'Sanctuary',   icon: '🛡️',    desc: 'Block the next bad effect aimed at your team.' },
-  mulligan:{ id: 'mulligan', name: 'Mulligan',    icon: '🔄',    desc: 'Re-roll the dice once on your turn.' },
+  freeze:     { id: 'freeze',     name: 'Freeze',      icon: '❄️', desc: 'Opponent skips their next turn.' },
+  banana:     { id: 'banana',     name: 'Banana Trap', icon: '🍌', desc: 'Place a trap. Enemy crossing loses 4 coins.' },
+  coindrop:   { id: 'coindrop',   name: 'Coin Drop',   icon: '💸', desc: 'Opponent loses 5 coins, scattered ahead.' },
+  warp:       { id: 'warp',       name: 'Warp',        icon: '🌀', desc: 'Teleport to any non-Sanctuary tile.' },
+  speedboost: { id: 'speedboost', name: 'Speed Boost', icon: '⚡', desc: '+3 to your next dice roll. Use before rolling.' },
 };
 const POWERUP_KEYS = Object.keys(POWERUPS);
 
-const MINIGAME_LIBRARY = [
-  'Mirror Mirror',
-  'Memory Verse Scramble',
-  'Bible Says',
-  'Memory Verse Match',
+const MINIGAMES = [
+  { id: 'mirror-mirror',      name: 'Mirror Mirror',         icon: '🪞', inApp: false, blurb: 'Form the shape on screen with your bodies before time runs out!' },
+  { id: 'bible-says',         name: 'Bible Says',            icon: '📖', inApp: false, blurb: 'America Says-style — fill in the blank Bible answer!' },
+  { id: 'memory-verse-match', name: 'Memory Verse Match',    icon: '🧩', inApp: false, blurb: 'Match the scripture pieces together!' },
+  { id: 'bomb-pass',          name: 'Bomb Pass',             icon: '💣', inApp: false, blurb: 'True or false hot potato — don\'t hold the bomb!' },
+  { id: 'slow-reveal',        name: 'Slow Reveal',           icon: '🖼️', inApp: true,  blurb: 'A blurry Bible scene clarifies. Guess what it is first!' },
+  { id: 'funny-face',         name: 'Funny Face Challenge',  icon: '😆', inApp: false, blurb: 'Make the other team laugh — if you do, you win!' },
 ];
 
-const RUBBER_BAND_THRESHOLD = 4;   // spaces behind leader before bias kicks in
-const RUBBER_BAND_BIAS_PROB = 0.30; // probability that a trailing team's roll is biased upward
+// Slow Reveal scene library (in-app mini-game content)
+const SLOW_REVEAL_SCENES = [
+  { emoji: '🛳️🐘🦒🐅🕊️', caption: 'Noah\'s Ark' },
+  { emoji: '🪨🧒⚔️🦣',    caption: 'David and Goliath' },
+  { emoji: '🐳🧎‍♂️🌊',     caption: 'Jonah and the Whale' },
+  { emoji: '🍞🐟👥🙏',    caption: 'Feeding the 5,000' },
+  { emoji: '🌊🧙‍♂️🚶🌊',   caption: 'Crossing the Red Sea' },
+  { emoji: '🦁🙏🦁🦁',    caption: 'Daniel in the Lions\' Den' },
+  { emoji: '⭐👶🐂🐑',    caption: 'The Birth of Jesus' },
+  { emoji: '🍞🍷🕊️👥',    caption: 'The Last Supper' },
+];
 
 // =====================================================================
-// QUESTION BANKS (age-tiered, Wilderness/Exodus theme)
+// BOARD GRAPH — 30 nodes: 24 outer loop + 6 inner shortcut
 // =====================================================================
 
-const QUESTIONS = {
-  lions: [
-    { q: 'Who led God\'s people out of Egypt?', a: ['Moses','Noah','Joseph','David'], c: 0 },
-    { q: 'What kind of bush did Moses see?',    a: ['Apple','Burning','Rose','Cherry'], c: 1 },
-    { q: 'What sea did God split for the people?', a: ['Yellow Sea','Blue Sea','Red Sea','Green Sea'], c: 2 },
-    { q: 'What food fell from the sky in the desert?', a: ['Pizza','Manna','Cake','Bread'], c: 1 },
-    { q: 'Where did water come from for the people to drink?', a: ['A cloud','A bottle','A rock','A tree'], c: 2 },
-    { q: 'Who was Moses\'s brother?',           a: ['Aaron','Adam','Andrew','Abel'], c: 0 },
-    { q: 'How many commandments did God give Moses?', a: ['Five','Ten','Twenty','One hundred'], c: 1 },
-    { q: 'What were God\'s people in Egypt?',   a: ['Slaves','Kings','Guests','Soldiers'], c: 0 },
-  ],
-  eagles: [
-    { q: 'What was the first plague God sent on Egypt?', a: ['Frogs','Locusts','Water turned to blood','Darkness'], c: 2 },
-    { q: 'Who was Moses\'s father-in-law?',     a: ['Aaron','Jethro','Joseph','Jacob'], c: 1 },
-    { q: 'What did Moses stretch out over the Red Sea?', a: ['Sword','Staff','Trumpet','Hand'], c: 1 },
-    { q: 'How many plagues did God send on Egypt?', a: ['Seven','Ten','Twelve','Five'], c: 1 },
-    { q: 'On what mountain did Moses receive the Law?', a: ['Sinai','Ararat','Zion','Carmel'], c: 0 },
-    { q: 'What idol did the Israelites build at the foot of the mountain?', a: ['Tower','Golden calf','Bronze snake','Stone altar'], c: 1 },
-    { q: 'Who led the people after Moses died?', a: ['Aaron','Joshua','David','Caleb'], c: 1 },
-    { q: 'How many years did Israel wander in the desert?', a: ['Seven','Twelve','Forty','One hundred'], c: 2 },
-  ],
-  doves: [
-    { q: 'What was the name of Moses\'s mother?', a: ['Miriam','Jochebed','Zipporah','Sarah'], c: 1 },
-    { q: 'Why was Moses given his name?', a: ['Means "deliverer"','Means "drawn out"','Means "shepherd"','Means "prince"'], c: 1 },
-    { q: 'Which plague was the death of the firstborn?', a: ['First','Fifth','Tenth','Seventh'], c: 2 },
-    { q: 'What feast remembers the Passover?', a: ['Hanukkah','Pesach','Sukkot','Purim'], c: 1 },
-    { q: 'What was put on the doorposts the night of the Passover?', a: ['Wine','Olive oil','Lamb\'s blood','Honey'], c: 2 },
-    { q: 'What was kept inside the Ark of the Covenant?', a: ['Gold coins','The tablets, manna, and Aaron\'s rod','Bread loaves','Sacred scrolls'], c: 1 },
-    { q: 'Who served as the first High Priest?', a: ['Caleb','Aaron','Joshua','Phinehas'], c: 1 },
-    { q: 'What led the Israelites by night through the wilderness?', a: ['Pillar of cloud','Pillar of fire','Bright star','Trail of smoke'], c: 1 },
-  ],
+const BOARD_GRAPH = {
+  // Outer loop (clockwise from top-left start)
+  N00: { type: 'start',     x:  220, y:  240, next: ['N01'] },
+  N01: { type: 'coin',      x:  380, y:  180, next: ['N02'] },
+  N02: { type: 'trivia',    x:  560, y:  150, next: ['N03'] },
+  N03: { type: 'coin',      x:  740, y:  140, next: ['N04'] },
+  N04: { type: 'trivia',    x:  920, y:  140, next: ['N05'] },
+  N05: { type: 'coin',      x: 1100, y:  140, next: ['N06', 'SH0'] }, // FORK
+  N06: { type: 'minigame',  x: 1280, y:  150, next: ['N07'] },
+  N07: { type: 'trivia',    x: 1460, y:  180, next: ['N08'] },
+  N08: { type: 'coin',      x: 1620, y:  230, next: ['N09'] },
+  N09: { type: 'sanctuary', x: 1740, y:  360, next: ['N10'] },
+  N10: { type: 'trivia',    x: 1760, y:  500, next: ['N11'] },
+  N11: { type: 'coin',      x: 1740, y:  640, next: ['N12'] },
+  N12: { type: 'minigame',  x: 1620, y:  770, next: ['N13'] },
+  N13: { type: 'trivia',    x: 1460, y:  810, next: ['N14'] },
+  N14: { type: 'coin',      x: 1280, y:  825, next: ['N15'] },
+  N15: { type: 'trivia',    x: 1100, y:  830, next: ['N16'] },
+  N16: { type: 'coin',      x:  920, y:  830, next: ['N17'] },
+  N17: { type: 'trivia',    x:  740, y:  820, next: ['N18'] },
+  N18: { type: 'coin',      x:  560, y:  795, next: ['N19'] },
+  N19: { type: 'minigame',  x:  380, y:  760, next: ['N20'] },
+  N20: { type: 'trivia',    x:  240, y:  650, next: ['N21'] },
+  N21: { type: 'sanctuary', x:  170, y:  500, next: ['N22'] },
+  N22: { type: 'coin',      x:  180, y:  360, next: ['N23'] },
+  N23: { type: 'trivia',    x:  240, y:  240, next: ['N00'] },
+  // Inner shortcut (top fork down to bottom)
+  SH0: { type: 'shortcut-tile', x: 1100, y:  260, next: ['SH1'] },
+  SH1: { type: 'trivia',        x: 1100, y:  370, next: ['SH2'] },
+  SH2: { type: 'sanctuary',     x: 1100, y:  480, next: ['SH3'] },
+  SH3: { type: 'coin',          x: 1100, y:  590, next: ['SH4'] },
+  SH4: { type: 'trivia',        x: 1100, y:  700, next: ['SH5'] },
+  SH5: { type: 'shortcut-tile', x: 1100, y:  810, next: ['N16'] }, // rejoins outer loop at N16
 };
+
+const ALL_NODE_IDS = Object.keys(BOARD_GRAPH);
+
+// =====================================================================
+// TRIVIA BANK (True / False, shared)
+// =====================================================================
+
+const TRIVIA = [
+  { q: "Noah took two of every animal onto the ark.", a: true },
+  { q: "Moses parted the Atlantic Ocean.", a: false },
+  { q: "Jonah was swallowed by a great fish.", a: true },
+  { q: "David defeated Goliath using a sling and a stone.", a: true },
+  { q: "Jesus had fourteen disciples.", a: false },
+  { q: "Adam and Eve lived in the Garden of Eden.", a: true },
+  { q: "Daniel was thrown into a lions' den and survived.", a: true },
+  { q: "The Bible has 99 books.", a: false },
+  { q: "King Solomon was known for his great wisdom.", a: true },
+  { q: "Jesus was born in Bethlehem.", a: true },
+  { q: "Jesus's first miracle was turning water into wine.", a: true },
+  { q: "Peter walked on water for a moment.", a: true },
+  { q: "Mary Magdalene was Jesus's mother.", a: false },
+  { q: "The Ten Commandments were given on Mount Everest.", a: false },
+  { q: "Joshua led the Israelites around Jericho seven times.", a: true },
+  { q: "Goliath was a giant warrior from the Philistines.", a: true },
+  { q: "Cain killed his brother Abel.", a: true },
+  { q: "Noah had three sons: Shem, Ham, and Japheth.", a: true },
+  { q: "The Lord's Prayer begins with 'Our Father in heaven'.", a: true },
+  { q: "Paul wrote many letters in the New Testament.", a: true },
+  { q: "Pontius Pilate sentenced Jesus to crucifixion.", a: true },
+  { q: "There are four Gospels in the New Testament.", a: true },
+  { q: "John the Baptist baptized Jesus in the Nile River.", a: false },
+  { q: "The book of Psalms has exactly 100 chapters.", a: false },
+  { q: "Moses received the Ten Commandments at Mount Sinai.", a: true },
+  { q: "Jesus rose from the dead on the third day.", a: true },
+  { q: "The Israelites wandered the desert for 50 years.", a: false },
+  { q: "Joseph's brothers sold him into slavery in Egypt.", a: true },
+  { q: "Abraham was married to Sarah.", a: true },
+  { q: "King Saul was the first king of Israel.", a: true },
+];
 
 // =====================================================================
 // GAME STATE
 // =====================================================================
 
 let state = freshState();
-let history = [];   // stack of prior state snapshots for undo
-let pendingTimers = []; // track timers so we can cancel them on undo/reset
+let history = [];
+let pendingTimers = [];
+let usedTriviaIdx = []; // track to avoid repeats in a session
 
 function freshState() {
   return {
-    turn: 1,
-    activeIdx: 0,
+    turn: 1,                  // current turn number (each team plays once per turn)
+    activeIdx: 0,             // 0 = red, 1 = blue
     phase: 'awaiting-roll',
-    teams: TEAMS.map(t => ({
+    teams: TEAMS_INIT.map(t => ({
       ...t,
-      position: 0,
-      score: 0,
+      position: 'N00',
+      coins: 0,
       inventory: [],
-      shielded: false,
-      skipNext: false,
-      mulliganUsed: false, // mulligan can be carried as inventory; this flag tracks "already re-rolled this turn"
+      sanctuary: false,       // active immunity
+      skipNext: false,        // freeze effect
+      speedBoost: false,      // +3 next roll
     })),
+    traps: {},                // { [nodeId]: { byTeamId } }
+    coinDrops: {},            // { [nodeId]: amount }
+    movePath: [],             // queued nodes for current move animation
     lastRoll: null,
-    pendingMove: null,   // when waiting on strategic-6 decision
-    currentQuestion: null,
+    currentTrivia: null,
     selectedAnswer: null,
-    currentTreasure: null,
     currentMinigame: null,
-    awaitingMulligan: false,   // true after roll if active team holds mulligan and may re-roll
-    awaitingStumbleTarget: null, // team index using stumble
+    minigameStep: null,       // 'instructions' | 'start-gate' | 'in-game' | 'score-award' | 'return'
+    srSceneIdx: null,
+    srRevealLevel: 0,
+    pendingPowerup: null,     // when picking trap location / warp target
     muted: false,
     hudCompact: false,
     won: false,
@@ -495,11 +663,9 @@ function freshState() {
 // =====================================================================
 
 function snapshot() {
-  // Deep clone via JSON (state contains only primitives + arrays/objects of primitives)
   history.push(JSON.parse(JSON.stringify(state)));
   if (history.length > 50) history.shift();
 }
-
 function undo() {
   if (!history.length) { toast('Nothing to undo'); return; }
   cancelPendingTimers();
@@ -508,7 +674,6 @@ function undo() {
   renderAll();
   toast('Undid last action');
 }
-
 function cancelPendingTimers() {
   for (const t of pendingTimers) clearTimeout(t);
   pendingTimers = [];
@@ -523,37 +688,30 @@ function later(fn, ms) {
 }
 
 // =====================================================================
-// AUDIO (Web Audio synthesized SFX + light music loop)
+// AUDIO (Web Audio synthesized SFX + music loop)
 // =====================================================================
 
-let audioCtx = null;
-let musicGain = null;
-let musicTimer = null;
-
+let audioCtx = null, musicGain = null, musicTimer = null;
 function ensureAudio() {
   if (audioCtx) return;
   try {
     audioCtx = new (window.AudioContext || window.webkitAudioContext)();
     musicGain = audioCtx.createGain();
-    musicGain.gain.value = 0.06;
+    musicGain.gain.value = 0.05;
     musicGain.connect(audioCtx.destination);
     startMusic();
-  } catch (e) { /* ignore — silent if no audio */ }
+  } catch (e) {}
 }
-
 function beep(freq, dur, type='sine', vol=0.18) {
   if (!audioCtx || state.muted) return;
   const o = audioCtx.createOscillator();
   const g = audioCtx.createGain();
-  o.type = type;
-  o.frequency.value = freq;
+  o.type = type; o.frequency.value = freq;
   g.gain.setValueAtTime(vol, audioCtx.currentTime);
   g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + dur);
   o.connect(g); g.connect(audioCtx.destination);
-  o.start();
-  o.stop(audioCtx.currentTime + dur);
+  o.start(); o.stop(audioCtx.currentTime + dur);
 }
-
 function sequence(notes, type='triangle', vol=0.18) {
   let t = 0;
   for (const [freq, dur] of notes) {
@@ -561,44 +719,39 @@ function sequence(notes, type='triangle', vol=0.18) {
     t += dur * 0.9;
   }
 }
-
 const SFX = {
   roll:     () => { for (let i=0;i<5;i++) setTimeout(()=>beep(200 + Math.random()*200, 0.05, 'square', 0.1), i*60); },
   hop:      () => beep(523, 0.08, 'triangle', 0.14),
   land:     () => sequence([[523,0.08],[659,0.12]], 'triangle'),
+  coin:     () => sequence([[784,0.06],[1047,0.10]], 'triangle', 0.22),
   correct:  () => sequence([[523,0.1],[659,0.1],[784,0.18]], 'triangle', 0.22),
   wrong:    () => sequence([[330,0.12],[247,0.22]], 'sawtooth', 0.16),
-  treasure: () => sequence([[523,0.08],[659,0.08],[784,0.08],[1047,0.18]], 'triangle', 0.20),
+  trap:     () => sequence([[300,0.15],[200,0.25]], 'sawtooth', 0.20),
+  warp:     () => sequence([[440,0.1],[660,0.1],[880,0.1],[660,0.2]], 'sine', 0.15),
+  freeze:   () => sequence([[440,0.1],[330,0.18]], 'sine', 0.16),
+  powerup:  () => sequence([[523,0.06],[659,0.06],[784,0.06],[1047,0.15]], 'triangle', 0.20),
   minigame: () => sequence([[392,0.1],[523,0.1],[659,0.1],[784,0.18]], 'square', 0.16),
   victory:  () => sequence([[523,0.15],[659,0.15],[784,0.15],[1047,0.4]], 'triangle', 0.25),
   click:    () => beep(880, 0.04, 'square', 0.10),
 };
-
 function startMusic() {
-  // Gentle 8-note loop in C, plays a soft pad-y arpeggio
   const pattern = [261.63, 329.63, 392.00, 329.63, 293.66, 349.23, 440.00, 349.23];
   let i = 0;
   function step() {
-    if (!audioCtx || state.muted) {
-      musicTimer = setTimeout(step, 500);
-      return;
-    }
+    if (!audioCtx || state.muted) { musicTimer = setTimeout(step, 500); return; }
     const o = audioCtx.createOscillator();
     const g = audioCtx.createGain();
-    o.type = 'sine';
-    o.frequency.value = pattern[i % pattern.length];
+    o.type = 'sine'; o.frequency.value = pattern[i % pattern.length];
     g.gain.setValueAtTime(0, audioCtx.currentTime);
     g.gain.linearRampToValueAtTime(0.04, audioCtx.currentTime + 0.05);
     g.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.55);
     o.connect(g); g.connect(musicGain);
-    o.start();
-    o.stop(audioCtx.currentTime + 0.6);
+    o.start(); o.stop(audioCtx.currentTime + 0.6);
     i++;
     musicTimer = setTimeout(step, 500);
   }
   step();
 }
-
 function toggleMute() {
   state.muted = !state.muted;
   document.getElementById('btn-mute').textContent = state.muted ? '🔇 (M)' : '🔊 (M)';
@@ -609,79 +762,123 @@ function toggleMute() {
 // RENDER
 // =====================================================================
 
-function tileEmoji(type) {
-  return { start: '🏁', goal: '🏆', question: '❓', treasure: '🎁', minigame: '🎮' }[type] || '';
+function tileGlyph(type) {
+  return { start: '🏁', coin: '💰', trivia: '❓', sanctuary: '🛡️', minigame: '🎮', 'shortcut-tile': '✨' }[type] || '';
+}
+function tileLabel(type) {
+  return { start: 'START', coin: 'COIN', trivia: 'TRIVIA', sanctuary: 'SAFE', minigame: 'GAME', 'shortcut-tile': 'PATH' }[type] || '';
 }
 
 function renderBoard() {
   const board = document.getElementById('board');
   board.innerHTML = '';
-  BOARD_SPACES.forEach((sp, i) => {
+  ALL_NODE_IDS.forEach(id => {
+    const node = BOARD_GRAPH[id];
     const tile = document.createElement('div');
-    tile.className = `tile ${sp.type}`;
-    tile.style.left = (sp.x - 65) + 'px';
-    tile.style.top  = (sp.y - 65) + 'px';
-    tile.innerHTML = `<span class="num">${i === 0 ? 'START' : (i === BOARD_SPACES.length - 1 ? 'GOAL' : i)}</span>${tileEmoji(sp.type)}`;
+    tile.className = `tile ${node.type}`;
+    tile.dataset.nodeId = id;
+    tile.style.left = node.x + 'px';
+    tile.style.top  = node.y + 'px';
+    tile.innerHTML = `<span class="lbl">${tileLabel(node.type)}</span>${tileGlyph(node.type)}`;
+    // Trap overlay
+    if (state.traps[id]) {
+      const overlay = document.createElement('div');
+      overlay.className = 'overlay';
+      overlay.textContent = '🍌';
+      tile.appendChild(overlay);
+    }
+    // Coin-drop pickups
+    if (state.coinDrops[id]) {
+      const pickup = document.createElement('div');
+      pickup.className = 'pickup';
+      pickup.textContent = '🪙';
+      tile.appendChild(pickup);
+    }
     board.appendChild(tile);
   });
+  // Path lines (SVG)
+  renderPaths();
+}
+
+function renderPaths() {
+  const svg = document.getElementById('paths');
+  if (!svg) return;
+  svg.innerHTML = '';
+  for (const id of ALL_NODE_IDS) {
+    const node = BOARD_GRAPH[id];
+    for (const nxt of node.next) {
+      const dest = BOARD_GRAPH[nxt];
+      if (!dest) continue;
+      const line = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+      line.setAttribute('x1', node.x);
+      line.setAttribute('y1', node.y);
+      line.setAttribute('x2', dest.x);
+      line.setAttribute('y2', dest.y);
+      line.setAttribute('class', 'path-line' + ((id.startsWith('SH') || nxt.startsWith('SH')) ? ' shortcut' : ''));
+      svg.appendChild(line);
+    }
+  }
 }
 
 function renderTokens() {
   const container = document.getElementById('tokens');
   container.innerHTML = '';
   state.teams.forEach((t, idx) => {
-    const sp = BOARD_SPACES[t.position];
-    // Offset tokens so they don't perfectly overlap on the same tile
-    const offsetX = (idx - 1) * 32;
-    const offsetY = (idx === 1) ? -8 : 0;
+    const node = BOARD_GRAPH[t.position];
+    const offsetX = idx === 0 ? -22 : 22;
     const tok = document.createElement('div');
     tok.className = 'token' + (idx === state.activeIdx ? ' active' : '');
-    tok.style.left = (sp.x - 45 + offsetX) + 'px';
-    tok.style.top  = (sp.y - 45 + offsetY) + 'px';
+    tok.style.left = (node.x + offsetX) + 'px';
+    tok.style.top  = node.y + 'px';
     tok.style.color = t.color;
     tok.textContent = t.mascot;
+    const flag = document.createElement('div');
+    flag.className = 'token-flag';
+    flag.style.background = t.color;
+    tok.appendChild(flag);
     container.appendChild(tok);
   });
 }
 
 function renderHUD() {
-  // Turn panel
+  document.getElementById('turn-num').textContent = state.turn;
   const active = state.teams[state.activeIdx];
-  document.getElementById('turn-text').innerHTML = `Turn ${state.turn} — <b style="color:${active.color}">${active.name}</b>`;
+  document.getElementById('turn-active').innerHTML = `<b style="color:${active.color}">${active.name}</b>'s turn`;
   document.getElementById('phase-text').textContent = phaseLabel(state.phase);
 
-  // Team panels
   state.teams.forEach((t, idx) => {
     const panel = document.getElementById(`team-${idx}`);
     panel.style.color = t.color;
     panel.classList.toggle('active', idx === state.activeIdx);
     const flags = [];
-    if (t.shielded) flags.push('🛡️');
-    if (t.skipNext) flags.push('💨');
+    if (t.sanctuary)  flags.push('🛡️');
+    if (t.skipNext)   flags.push('❄️');
+    if (t.speedBoost) flags.push('⚡');
     panel.innerHTML = `
-      <div class="name">${t.mascot} ${t.name} ${flags.join('')}</div>
-      <div class="stats">
-        <span>📍 ${t.position}/${BOARD_SPACES.length - 1}</span>
-        <span>⭐ ${t.score}</span>
+      <div class="row1">
+        <div class="mascot">${t.mascot}</div>
+        <div class="name">${t.name}</div>
+        <div class="flags">${flags.join('')}</div>
       </div>
-      <div class="inv" id="inv-${idx}"></div>
+      <div class="coins">${t.coins}<span class="lbl-suffix">coins</span></div>
+      <div class="inv"></div>
     `;
     const inv = panel.querySelector('.inv');
-    t.inventory.forEach((p, pidx) => {
+    t.inventory.forEach((pid, pidx) => {
       const chip = document.createElement('button');
       chip.className = 'powerchip';
-      chip.textContent = `${POWERUPS[p].icon} ${POWERUPS[p].name}`;
-      chip.title = POWERUPS[p].desc;
+      chip.textContent = `${POWERUPS[pid].icon} ${POWERUPS[pid].name}`;
+      chip.title = POWERUPS[pid].desc;
+      chip.disabled = (idx !== state.activeIdx) || (state.phase !== 'awaiting-roll');
       chip.onclick = () => usePowerup(idx, pidx);
       inv.appendChild(chip);
     });
   });
 
-  // Primary button
   const primaryBtn = document.getElementById('primary-btn');
   const pa = getPrimaryAction();
   primaryBtn.textContent = pa.label;
-  primaryBtn.disabled = pa.disabled;
+  primaryBtn.disabled = !!pa.disabled;
   primaryBtn.style.background = pa.color || '#6abf3c';
 }
 
@@ -689,29 +886,37 @@ function phaseLabel(phase) {
   return {
     'awaiting-roll':       'Awaiting roll — press SPACE',
     'rolling':             'Rolling dice...',
-    'awaiting-strategic-6':'Strategic Choice — forward, back, or stay?',
     'moving':              'Moving...',
-    'awaiting-answer':     'Awaiting answer — pick A/B/C/D',
-    'awaiting-judgment':   'Mark answer — Enter (correct) or ⌫ (wrong)',
-    'awaiting-treasure':   'Treasure! Press SPACE to continue',
-    'awaiting-minigame':   'Mini-game! Pick a winning tribe',
-    'won':                 'Game over!',
+    'awaiting-path-pick':  'Pick a path!',
+    'awaiting-warp-pick':  'Pick a tile to warp to',
+    'awaiting-trap-pick':  'Pick a tile to trap',
+    'awaiting-tf':         'Pick TRUE or FALSE',
+    'awaiting-judgment':   'Mark answer — Enter ✓ / ⌫ ✗',
+    'mg-instructions':     'Mini-game intro',
+    'mg-start-gate':       'Press SPACE to start',
+    'mg-in-game':          'Mini-game in progress',
+    'mg-score-award':      'Pick winner',
+    'won':                 'Game over',
     'resolving':           'Resolving...',
   }[phase] || phase;
 }
 
 function getPrimaryAction() {
   switch (state.phase) {
-    case 'awaiting-roll':       return { label: 'ROLL (SPACE)', color: '#6abf3c' };
-    case 'rolling':             return { label: 'rolling...', disabled: true };
-    case 'awaiting-strategic-6':return { label: 'CHOOSE on screen', disabled: true };
-    case 'moving':              return { label: 'moving...', disabled: true };
-    case 'awaiting-answer':     return { label: 'Pick A/B/C/D', disabled: true };
-    case 'awaiting-judgment':   return { label: '↵ correct  ⌫ wrong', disabled: true };
-    case 'awaiting-treasure':   return { label: 'CONTINUE (SPACE)', color: '#d9b34a' };
-    case 'awaiting-minigame':   return { label: 'Pick winner', disabled: true };
-    case 'won':                 return { label: 'GAME OVER', disabled: true };
-    default:                    return { label: '...', disabled: true };
+    case 'awaiting-roll':      return { label: 'ROLL (SPACE)', color: '#6abf3c' };
+    case 'rolling':            return { label: 'rolling...', disabled: true };
+    case 'moving':             return { label: 'moving...', disabled: true };
+    case 'awaiting-path-pick': return { label: 'PICK PATH on screen', disabled: true };
+    case 'awaiting-warp-pick': return { label: 'CLICK A TILE', disabled: true };
+    case 'awaiting-trap-pick': return { label: 'CLICK A TILE', disabled: true };
+    case 'awaiting-tf':        return { label: 'T or F', disabled: true };
+    case 'awaiting-judgment':  return { label: '↵ correct  ⌫ wrong', disabled: true };
+    case 'mg-instructions':    return { label: 'NEXT (SPACE)', color: '#8e3acd' };
+    case 'mg-start-gate':      return { label: 'START (SPACE)', color: '#8e3acd' };
+    case 'mg-in-game':         return { label: 'END GAME (SPACE)', color: '#8e3acd' };
+    case 'mg-score-award':     return { label: 'Pick winner', disabled: true };
+    case 'won':                return { label: 'GAME OVER', disabled: true };
+    default:                   return { label: '...', disabled: true };
   }
 }
 
@@ -722,177 +927,258 @@ function renderAll() {
 }
 
 // =====================================================================
-// ACTIONS
+// ACTIONS — rolling / moving / landing
 // =====================================================================
 
 function rollDice() {
   if (state.phase !== 'awaiting-roll') return;
   ensureAudio();
-  snapshot();
 
-  // Stumble check: if active team is set to skip, skip them
   const active = state.teams[state.activeIdx];
+
+  // Skip-next check (Freeze effect)
   if (active.skipNext) {
+    snapshot();
     active.skipNext = false;
-    toast(`${active.name} are stumbling — turn skipped!`);
-    SFX.wrong();
-    passTurn();
+    toast(`${active.name} is FROZEN this turn ❄️`);
+    SFX.freeze();
+    later(() => passTurn(), 1200);
     return;
   }
 
+  snapshot();
   state.phase = 'rolling';
   renderHUD();
   SFX.roll();
 
   const overlay = document.getElementById('dice-overlay');
   const dice = document.getElementById('dice');
+  const boost = document.getElementById('dice-boost');
   overlay.classList.add('show');
   dice.classList.add('rolling');
   dice.textContent = '?';
+  boost.textContent = active.speedBoost ? '⚡ +3 SPEED BOOST!' : '';
 
-  // Animation: flicker random numbers, then settle
   let ticks = 0;
   const flicker = setInterval(() => {
     dice.textContent = 1 + Math.floor(Math.random() * 6);
     ticks++;
     if (ticks > 14) {
       clearInterval(flicker);
-      let result = rollD6(state.activeIdx);
-      if (state.awaitingMulligan) {
-        const reroll = rollD6(state.activeIdx);
-        const better = Math.max(result, reroll);
-        dice.textContent = `${result}→${reroll}`;
-        dice.style.fontSize = '90px';
-        state.awaitingMulligan = false;
-        toast(`Mulligan: ${result} then ${reroll} → using ${better}`);
-        result = better;
-      } else {
-        dice.textContent = result;
+      let result = 1 + Math.floor(Math.random() * 6);
+      if (active.speedBoost) {
+        result += 3;
+        active.speedBoost = false;
       }
+      dice.textContent = result;
       dice.classList.remove('rolling');
       state.lastRoll = result;
       later(() => {
         overlay.classList.remove('show');
-        dice.style.fontSize = '';
-        handleRollResult(result);
-      }, 900);
+        boost.textContent = '';
+        beginMove(result);
+      }, 850);
     }
   }, 70);
 }
 
-function rollD6(teamIdx) {
-  // Subtle rubber-banding: if team is far behind leader, weight rolls toward higher numbers
-  const leaderPos = Math.max(...state.teams.map(t => t.position));
-  const gap = leaderPos - state.teams[teamIdx].position;
-  const biased = gap >= RUBBER_BAND_THRESHOLD && Math.random() < RUBBER_BAND_BIAS_PROB;
-  if (biased) return 3 + Math.ceil(Math.random() * 3); // 4, 5, or 6
-  return 1 + Math.floor(Math.random() * 6);
-}
-
-function handleRollResult(roll) {
-  if (roll === 6) {
-    state.phase = 'awaiting-strategic-6';
-    state.pendingMove = 6;
-    renderHUD();
-    showStrategicChoice();
-  } else {
-    moveActive(roll);
-  }
-}
-
-function showStrategicChoice() {
-  const active = state.teams[state.activeIdx];
-  showCard(`
-    <div class="badge">STRATEGIC SIX</div>
-    <h1 style="color:${active.color}">${active.mascot} ${active.name} rolled a 6!</h1>
-    <div class="body">Choose your move carefully...</div>
-    <div class="strategic-choices">
-      <button class="strat-btn" data-strat="forward">
-        <span class="emoji">⏩</span>FORWARD 6
-      </button>
-      <button class="strat-btn" data-strat="back">
-        <span class="emoji">⏪</span>BACK 6
-      </button>
-      <button class="strat-btn" data-strat="stay">
-        <span class="emoji">⏸️</span>STAY
-      </button>
-    </div>
-  `);
-  document.querySelectorAll('[data-strat]').forEach(btn => {
-    btn.onclick = () => resolveStrategic(btn.dataset.strat);
-  });
-}
-
-function resolveStrategic(choice) {
-  closeModal();
-  if (choice === 'forward')      moveActive(6);
-  else if (choice === 'back')    moveActive(-6);
-  else /* stay */                { state.phase = 'moving'; renderAll(); later(() => passTurn(), 400); }
-}
-
-function moveActive(delta) {
+function beginMove(steps) {
   state.phase = 'moving';
+  state.movePath = [];
   renderHUD();
-  const team = state.teams[state.activeIdx];
-  const dir = Math.sign(delta);
-  const steps = Math.abs(delta);
-  let step = 0;
-  const hopOnce = () => {
-    if (step >= steps) {
-      // Landed
-      SFX.land();
-      later(() => landOn(team.position), 250);
-      return;
-    }
-    let next = team.position + dir;
-    if (next < 0) next = 0;
-    if (next > BOARD_SPACES.length - 1) next = BOARD_SPACES.length - 1;
-    team.position = next;
-    SFX.hop();
-    renderTokens();
-    step++;
-    if (next === BOARD_SPACES.length - 1 && dir > 0) {
-      // Reached goal — short-circuit
-      later(() => landOn(team.position), 400);
-      return;
-    }
-    later(hopOnce, 350);
-  };
-  hopOnce();
+  doMoveStep(steps);
 }
 
-function landOn(pos) {
-  const space = BOARD_SPACES[pos];
-  if (space.type === 'goal') {
-    declareWinner(state.activeIdx);
+function doMoveStep(remaining) {
+  if (remaining <= 0) {
+    // Finished moving — land
+    const team = state.teams[state.activeIdx];
+    SFX.land();
+    later(() => landOn(team.position), 250);
     return;
   }
-  if (space.type === 'question') return openQuestion();
-  if (space.type === 'treasure') return openTreasure();
-  if (space.type === 'minigame') return openMinigame();
-  // start or unknown — just pass
-  passTurn();
+  const team = state.teams[state.activeIdx];
+  const node = BOARD_GRAPH[team.position];
+
+  // Branching check
+  if (node.next.length > 1) {
+    showPathChoice(node, (chosenNext) => {
+      hopTo(chosenNext, remaining);
+    });
+    return;
+  }
+
+  hopTo(node.next[0], remaining);
 }
 
-// ---- Questions ----
-function openQuestion() {
+function hopTo(nextId, remaining) {
+  const team = state.teams[state.activeIdx];
+  team.position = nextId;
+  SFX.hop();
+  renderTokens();
+
+  // Pickup coin drops on pass-through
+  if (state.coinDrops[nextId]) {
+    const amt = state.coinDrops[nextId];
+    delete state.coinDrops[nextId];
+    team.coins += amt;
+    SFX.coin();
+    toast(`${team.name} picked up ${amt} coin${amt > 1 ? 's' : ''}!`);
+    renderBoard();
+    renderHUD();
+  }
+
+  // Trap check on pass-through (also triggered on landing further down)
+  if (state.traps[nextId] && remaining > 1) {
+    // Mid-traversal — still trigger trap
+    triggerTrap(nextId);
+    return;
+  }
+
+  later(() => doMoveStep(remaining - 1), 360);
+}
+
+function triggerTrap(nodeId) {
+  const team = state.teams[state.activeIdx];
+  const trap = state.traps[nodeId];
+  delete state.traps[nodeId];
+
+  if (team.sanctuary) {
+    toast(`${team.name}'s Sanctuary 🛡️ blocked the trap!`);
+    SFX.land();
+    renderBoard();
+    later(() => passTurn(), 1200);
+    return;
+  }
+
+  const loss = Math.min(TRAP_PENALTY, team.coins);
+  team.coins -= loss;
+  SFX.trap();
+  toast(`${team.mascot} ${team.name} stumbled on a 🍌 trap! -${loss} coins`);
+  renderBoard();
+  renderHUD();
+  later(() => passTurn(), 1500);
+}
+
+function showPathChoice(node, onPick) {
+  state.phase = 'awaiting-path-pick';
+  renderHUD();
   const active = state.teams[state.activeIdx];
-  const bank = QUESTIONS[active.tier];
-  const q = bank[Math.floor(Math.random() * bank.length)];
-  state.currentQuestion = q;
+  const choices = node.next.map((nid, idx) => {
+    const dest = BOARD_GRAPH[nid];
+    const arrow = idx === 0 ? '➡️' : '⬇️';
+    return `<button class="path-btn" data-path="${nid}" data-key="${idx === 0 ? 'right' : 'left'}">
+      <span class="arrow">${arrow}</span>
+      ${idx === 0 ? 'KEEP GOING' : 'TAKE SHORTCUT'}
+      <div class="tile-type">→ ${tileLabel(dest.type)} ${tileGlyph(dest.type)}</div>
+    </button>`;
+  }).join('');
+  showCard(`
+    <div class="badge" style="color:${active.color}">${active.mascot} ${active.name} — PATH CHOICE</div>
+    <h1>Pick a path!</h1>
+    <div class="path-choices">${choices}</div>
+    <div style="font-size:18px;opacity:.6;text-align:center">← / → keys, or click a path</div>
+  `);
+  let picked = false;
+  document.querySelectorAll('[data-path]').forEach(btn => {
+    btn.onclick = () => {
+      if (picked) return;
+      picked = true;
+      state.phase = 'moving';
+      closeModal();
+      onPick(btn.dataset.path);
+    };
+  });
+  // Stash picker for keyboard input
+  state._pickPath = (which) => {
+    const btns = document.querySelectorAll('[data-path]');
+    const idx = which === 'right' ? 0 : (which === 'left' ? 1 : -1);
+    if (idx >= 0 && btns[idx]) btns[idx].click();
+  };
+}
+
+function landOn(nodeId) {
+  const node = BOARD_GRAPH[nodeId];
+
+  // Trap on landing
+  if (state.traps[nodeId]) {
+    triggerTrap(nodeId);
+    return;
+  }
+  // Coin-drop pickup on landing
+  if (state.coinDrops[nodeId]) {
+    const team = state.teams[state.activeIdx];
+    team.coins += state.coinDrops[nodeId];
+    SFX.coin();
+    toast(`${team.name} +${state.coinDrops[nodeId]} coins!`);
+    delete state.coinDrops[nodeId];
+    renderBoard();
+    renderHUD();
+  }
+
+  switch (node.type) {
+    case 'coin':      return resolveCoinSpace();
+    case 'trivia':    return openTrivia();
+    case 'sanctuary': return resolveSanctuary();
+    case 'minigame':  return openMinigame();
+    case 'start':
+    case 'shortcut-tile':
+    default:          return passTurn();
+  }
+}
+
+function resolveCoinSpace() {
+  const team = state.teams[state.activeIdx];
+  team.coins += COIN_REWARD;
+  SFX.coin();
+  toast(`${team.mascot} ${team.name} +${COIN_REWARD} coins!`);
+  // Power-up bonus chance
+  if (Math.random() < POWERUP_CHANCE_COIN) {
+    const pid = POWERUP_KEYS[Math.floor(Math.random() * POWERUP_KEYS.length)];
+    team.inventory.push(pid);
+    later(() => {
+      SFX.powerup();
+      toast(`Bonus! ${POWERUPS[pid].icon} ${POWERUPS[pid].name}`);
+    }, 700);
+  }
+  renderHUD();
+  later(() => passTurn(), 1500);
+}
+
+function resolveSanctuary() {
+  const team = state.teams[state.activeIdx];
+  team.sanctuary = true;
+  SFX.warp();
+  toast(`${team.mascot} ${team.name} is safe in Sanctuary 🛡️`);
+  renderHUD();
+  later(() => passTurn(), 1500);
+}
+
+// ---- Trivia ----
+function openTrivia() {
+  // Pick a non-repeating question
+  if (usedTriviaIdx.length >= TRIVIA.length) usedTriviaIdx = [];
+  let qIdx;
+  do { qIdx = Math.floor(Math.random() * TRIVIA.length); } while (usedTriviaIdx.includes(qIdx));
+  usedTriviaIdx.push(qIdx);
+
+  const q = TRIVIA[qIdx];
+  state.currentTrivia = q;
   state.selectedAnswer = null;
-  state.phase = 'awaiting-answer';
+  state.phase = 'awaiting-tf';
   renderHUD();
 
+  const active = state.teams[state.activeIdx];
   showCard(`
-    <div class="badge" style="color:${active.color}">${active.mascot} ${active.name} — QUESTION</div>
+    <div class="badge" style="color:${active.color}">${active.mascot} ${active.name} — TRUE OR FALSE</div>
     <h1>${escapeHtml(q.q)}</h1>
-    <div class="choices">
-      ${q.a.map((opt, i) => `
-        <button class="choice" data-pick="${i}">
-          <span class="letter">${String.fromCharCode(65+i)}.</span>${escapeHtml(opt)}
-        </button>
-      `).join('')}
+    <div class="tf-choices">
+      <button class="tf-choice" data-pick="true">
+        <span class="letter">T</span>TRUE
+      </button>
+      <button class="tf-choice" data-pick="false">
+        <span class="letter">F</span>FALSE
+      </button>
     </div>
     <div class="card-actions" id="judgment-actions" style="display:none">
       <button class="cardbtn wrong" id="judge-wrong">WRONG (⌫)</button>
@@ -900,17 +1186,17 @@ function openQuestion() {
     </div>
   `);
   document.querySelectorAll('[data-pick]').forEach(btn => {
-    btn.onclick = () => pickAnswer(parseInt(btn.dataset.pick));
+    btn.onclick = () => pickTF(btn.dataset.pick === 'true');
   });
-  document.getElementById('judge-correct').onclick = () => judgeAnswer(true);
-  document.getElementById('judge-wrong').onclick   = () => judgeAnswer(false);
+  document.getElementById('judge-correct').onclick = () => judgeTrivia(true);
+  document.getElementById('judge-wrong').onclick   = () => judgeTrivia(false);
 }
 
-function pickAnswer(idx) {
-  if (state.phase !== 'awaiting-answer' && state.phase !== 'awaiting-judgment') return;
-  state.selectedAnswer = idx;
+function pickTF(val) {
+  if (state.phase !== 'awaiting-tf' && state.phase !== 'awaiting-judgment') return;
+  state.selectedAnswer = val;
   document.querySelectorAll('[data-pick]').forEach(btn => {
-    btn.classList.toggle('picked', parseInt(btn.dataset.pick) === idx);
+    btn.classList.toggle('picked', (btn.dataset.pick === 'true') === val);
   });
   document.getElementById('judgment-actions').style.display = 'flex';
   state.phase = 'awaiting-judgment';
@@ -918,99 +1204,69 @@ function pickAnswer(idx) {
   SFX.click();
 }
 
-function judgeAnswer(correct) {
+function judgeTrivia(correct) {
   if (state.phase !== 'awaiting-judgment') return;
   const team = state.teams[state.activeIdx];
-  const q = state.currentQuestion;
-  // Highlight the correct/incorrect choices
+  const q = state.currentTrivia;
+  // Highlight the actual answer
   document.querySelectorAll('[data-pick]').forEach(btn => {
-    const i = parseInt(btn.dataset.pick);
-    if (i === q.c) btn.classList.add('correct');
-    if (i === state.selectedAnswer && !correct) btn.classList.add('incorrect');
+    const v = btn.dataset.pick === 'true';
+    if (v === q.a) btn.classList.add('correct');
+    if (v === state.selectedAnswer && !correct) btn.classList.add('incorrect');
   });
   if (correct) {
-    team.score += 1;
+    team.coins += TRIVIA_REWARD;
     SFX.correct();
-    toast(`${team.name} +1 point!`);
+    toast(`${team.name} +${TRIVIA_REWARD} coins!`);
+    // Power-up bonus chance
+    if (Math.random() < POWERUP_CHANCE_TRIVIA) {
+      const pid = POWERUP_KEYS[Math.floor(Math.random() * POWERUP_KEYS.length)];
+      team.inventory.push(pid);
+      later(() => {
+        SFX.powerup();
+        toast(`Bonus! ${POWERUPS[pid].icon} ${POWERUPS[pid].name}`);
+      }, 700);
+    }
   } else {
     SFX.wrong();
-    toast(`${team.name} miss — turn lost`);
+    toast(`Miss — no coins this round`);
   }
   document.getElementById('judge-correct').disabled = true;
   document.getElementById('judge-wrong').disabled = true;
+  state.phase = 'resolving';
+  renderHUD();
   later(() => {
     closeModal();
     passTurn();
-  }, 1500);
+  }, 1700);
 }
 
-// ---- Treasure ----
-function openTreasure() {
-  const team = state.teams[state.activeIdx];
-  const pick = POWERUP_KEYS[Math.floor(Math.random() * POWERUP_KEYS.length)];
-  state.currentTreasure = pick;
-  team.inventory.push(pick);
-  state.phase = 'awaiting-treasure';
-  renderHUD();
-  SFX.treasure();
-  const p = POWERUPS[pick];
-  showCard(`
-    <div class="badge" style="color:${team.color}">${team.mascot} ${team.name} — TREASURE</div>
-    <div class="treasure-icon">${p.icon}</div>
-    <div class="treasure-name">${p.name}</div>
-    <div class="treasure-desc">${escapeHtml(p.desc)}</div>
-    <div class="card-actions">
-      <button class="cardbtn" id="treasure-continue">CONTINUE (SPACE)</button>
-    </div>
-  `);
-  document.getElementById('treasure-continue').onclick = () => {
-    closeModal();
-    passTurn();
-  };
-}
-
-// ---- Mini-game ----
+// ---- Mini-game framework ----
 function openMinigame() {
-  state.phase = 'awaiting-minigame';
+  // Defensive: refuse to re-enter if a mini-game is already in progress
+  if (state.currentMinigame || state.phase === 'resolving') return;
+  state.phase = 'resolving';
   renderHUD();
   SFX.minigame();
+  // Spin picker first
   showCard(`
     <div class="badge">MINI-GAME!</div>
-    <h1>Drawn from the library...</h1>
-    <div id="mg-wheel" class="spinning">${MINIGAME_LIBRARY[0]}</div>
-    <div class="body" id="mg-instructions" style="opacity:0; font-size:24px">
-      Host: play this with the kids. Operator: pick which tribe won.
-    </div>
-    <div class="mg-winners" id="mg-winners" style="display:none">
-      ${state.teams.map((t, i) => `
-        <button class="mg-winner-btn" data-winner="${i}" style="color:${t.color}">
-          ${t.mascot} ${t.name}<br>WINS
-        </button>
-      `).join('')}
-    </div>
+    <h1>Drawing from the catalog...</h1>
+    <div id="mg-wheel" class="spinning">${MINIGAMES[0].name}</div>
   `);
-  // Spin the wheel
   const wheel = document.getElementById('mg-wheel');
-  let i = 0;
-  let interval = 80;
-  let elapsed = 0;
-  const totalDuration = 2200;
+  let i = 0, interval = 80, elapsed = 0;
   const tick = () => {
-    wheel.textContent = MINIGAME_LIBRARY[i % MINIGAME_LIBRARY.length];
+    wheel.textContent = MINIGAMES[i % MINIGAMES.length].name;
     i++;
     elapsed += interval;
-    if (elapsed >= totalDuration) {
+    if (elapsed >= 2200) {
       wheel.classList.remove('spinning');
-      const choice = MINIGAME_LIBRARY[Math.floor(Math.random() * MINIGAME_LIBRARY.length)];
-      wheel.textContent = choice;
-      state.currentMinigame = choice;
+      const game = MINIGAMES[Math.floor(Math.random() * MINIGAMES.length)];
+      state.currentMinigame = game;
+      wheel.textContent = game.name;
       SFX.land();
-      document.getElementById('mg-instructions').style.opacity = '1';
-      const winners = document.getElementById('mg-winners');
-      winners.style.display = 'grid';
-      winners.querySelectorAll('[data-winner]').forEach(btn => {
-        btn.onclick = () => awardMinigameWinner(parseInt(btn.dataset.winner));
-      });
+      later(() => beginMinigameInstructions(), 800);
       return;
     }
     interval *= 1.08;
@@ -1019,141 +1275,366 @@ function openMinigame() {
   tick();
 }
 
-function awardMinigameWinner(teamIdx) {
-  const winner = state.teams[teamIdx];
-  winner.score += 2;
-  // Award a power-up too
-  const pick = POWERUP_KEYS[Math.floor(Math.random() * POWERUP_KEYS.length)];
-  winner.inventory.push(pick);
-  SFX.treasure();
-  toast(`${winner.mascot} ${winner.name} +2 score and ${POWERUPS[pick].name}!`);
-  closeModal();
-  later(() => passTurn(), 600);
+function beginMinigameInstructions() {
+  const g = state.currentMinigame;
+  if (!g) return; // stale callback after a passTurn — ignore
+  state.phase = 'mg-instructions';
+  state.minigameStep = 'instructions';
+  renderHUD();
+  showCard(`
+    <div class="mg-step">STEP 1 / 4 — INSTRUCTIONS</div>
+    <div class="mg-icon">${g.icon}</div>
+    <div class="mg-name">${g.name}</div>
+    <div class="mg-blurb">${escapeHtml(g.blurb)}</div>
+    <div class="card-actions">
+      <button class="cardbtn big" id="mg-next-1">NEXT (SPACE)</button>
+    </div>
+  `);
+  document.getElementById('mg-next-1').onclick = () => beginMinigameStartGate();
 }
 
-// ---- Powerups ----
+function beginMinigameStartGate() {
+  const g = state.currentMinigame;
+  if (!g) return;
+  state.phase = 'mg-start-gate';
+  state.minigameStep = 'start-gate';
+  renderHUD();
+  showCard(`
+    <div class="mg-step">STEP 2 / 4 — READY?</div>
+    <div class="mg-icon">${g.icon}</div>
+    <div class="mg-name">${g.name}</div>
+    <div class="mg-blurb">Presenter: explain the rules, then press START when ready.</div>
+    <div class="card-actions">
+      <button class="cardbtn big" id="mg-start">START! (SPACE)</button>
+    </div>
+  `);
+  document.getElementById('mg-start').onclick = () => beginMinigameInGame();
+}
+
+function beginMinigameInGame() {
+  const g = state.currentMinigame;
+  if (!g) return;
+  state.phase = 'mg-in-game';
+  state.minigameStep = 'in-game';
+  renderHUD();
+  if (g.id === 'slow-reveal') {
+    return renderSlowReveal();
+  }
+  // Host-led placeholder
+  showCard(`
+    <div class="mg-step">STEP 3 / 4 — IN GAME</div>
+    <div class="mg-name">${g.icon} ${g.name}</div>
+    <div class="mg-host-notice">
+      The PRESENTER runs this game live with the kids.<br>
+      When the round is done, press END GAME below to score it.
+    </div>
+    <div class="card-actions">
+      <button class="cardbtn big" id="mg-end">END GAME (SPACE)</button>
+    </div>
+  `);
+  document.getElementById('mg-end').onclick = () => beginMinigameScoreAward();
+}
+
+function renderSlowReveal() {
+  state.srSceneIdx = Math.floor(Math.random() * SLOW_REVEAL_SCENES.length);
+  state.srRevealLevel = 0;
+  const scene = SLOW_REVEAL_SCENES[state.srSceneIdx];
+  showCard(`
+    <div class="mg-step">STEP 3 / 4 — SLOW REVEAL</div>
+    <div class="mg-name">🖼️ Slow Reveal</div>
+    <div id="sr-stage">
+      <div id="sr-emoji">${scene.emoji}</div>
+    </div>
+    <div id="sr-caption"></div>
+    <div id="sr-controls">
+      <button class="cardbtn neutral" id="sr-reveal">REVEAL MORE (→)</button>
+      <button class="cardbtn big" id="sr-end">PICK WINNER (SPACE)</button>
+    </div>
+  `);
+  document.getElementById('sr-reveal').onclick = () => slowRevealStep();
+  document.getElementById('sr-end').onclick = () => beginMinigameScoreAward();
+  updateSlowRevealStage();
+}
+
+function slowRevealStep() {
+  if (state.srRevealLevel < 3) {
+    state.srRevealLevel++;
+    SFX.click();
+    updateSlowRevealStage();
+  }
+}
+
+function updateSlowRevealStage() {
+  const scene = SLOW_REVEAL_SCENES[state.srSceneIdx];
+  const emoji = document.getElementById('sr-emoji');
+  const cap = document.getElementById('sr-caption');
+  if (!emoji) return;
+  const blurMap = [40, 22, 10, 0];
+  emoji.style.filter = `blur(${blurMap[state.srRevealLevel]}px)`;
+  if (state.srRevealLevel === 3) {
+    cap.textContent = scene.caption;
+  } else if (state.srRevealLevel === 2) {
+    cap.textContent = `Hint: ${scene.caption.split(' ').slice(0, 1).join(' ')}...`;
+  } else {
+    cap.textContent = '';
+  }
+}
+
+function beginMinigameScoreAward() {
+  const g = state.currentMinigame;
+  if (!g) return;
+  state.phase = 'mg-score-award';
+  state.minigameStep = 'score-award';
+  renderHUD();
+  showCard(`
+    <div class="mg-step">STEP 4 / 4 — WHO WON?</div>
+    <div class="mg-name">${g.icon} ${g.name}</div>
+    <div class="winner-grid">
+      <button class="winner-btn" data-winner="0" style="color:${state.teams[0].color}">
+        <span class="mascot">${state.teams[0].mascot}</span>${state.teams[0].name}<br>WINS
+      </button>
+      <button class="winner-btn" data-winner="1" style="color:${state.teams[1].color}">
+        <span class="mascot">${state.teams[1].mascot}</span>${state.teams[1].name}<br>WINS
+      </button>
+      <button class="winner-btn" data-winner="draw" style="color:#6a5a40">
+        <span class="mascot">🤝</span>DRAW<br>(no coins)
+      </button>
+    </div>
+  `);
+  document.querySelectorAll('[data-winner]').forEach(btn => {
+    btn.onclick = () => awardMinigameWinner(btn.dataset.winner);
+  });
+}
+
+function awardMinigameWinner(winnerKey) {
+  if (state.phase !== 'mg-score-award') return; // prevent double-award
+  state.phase = 'resolving';
+  if (winnerKey === 'draw') {
+    SFX.click();
+    toast('Mini-game: draw — no coins awarded.');
+  } else {
+    const idx = parseInt(winnerKey);
+    const winner = state.teams[idx];
+    winner.coins += MINIGAME_REWARD;
+    if (Math.random() < POWERUP_CHANCE_MINIGAME) {
+      const pid = POWERUP_KEYS[Math.floor(Math.random() * POWERUP_KEYS.length)];
+      winner.inventory.push(pid);
+      toast(`${winner.mascot} ${winner.name} +${MINIGAME_REWARD} coins and ${POWERUPS[pid].name}!`);
+    } else {
+      toast(`${winner.mascot} ${winner.name} +${MINIGAME_REWARD} coins!`);
+    }
+    SFX.powerup();
+  }
+  closeModal();
+  renderHUD();
+  later(() => passTurn(), 1200);
+}
+
+// ---- Power-ups ----
 function usePowerup(teamIdx, invIdx) {
-  // Only the active team can use powerups, and only on their own turn while awaiting-roll (or for stumble/shield, more loosely)
+  if (teamIdx !== state.activeIdx) { toast(`Wait for ${state.teams[teamIdx].name}'s turn`); return; }
+  if (state.phase !== 'awaiting-roll') { toast('Use power-ups before rolling'); return; }
   const team = state.teams[teamIdx];
   const pid = team.inventory[invIdx];
   if (!pid) return;
-  // Restrict use: must be the active team's turn and they're at awaiting-roll for most
-  if (teamIdx !== state.activeIdx) {
-    toast(`Wait for ${state.teams[teamIdx].name}'s turn`);
-    return;
-  }
-  if (state.phase !== 'awaiting-roll') {
-    toast(`Can only use powerup before rolling`);
-    return;
-  }
   snapshot();
-  if (pid === 'shield')   { team.shielded = true; team.inventory.splice(invIdx, 1); toast(`${team.name} ${POWERUPS.shield.icon} Sanctuary up`); SFX.treasure(); renderHUD(); return; }
-  if (pid === 'mulligan') { state.awaitingMulligan = true; team.inventory.splice(invIdx, 1); toast(`${team.name} can re-roll once`); SFX.click(); renderHUD(); return; }
-  if (pid === 'double')   { team.inventory.splice(invIdx, 1); toast(`${team.name} rolling DOUBLE`); doubleRoll(); return; }
-  if (pid === 'stumble')  { team.inventory.splice(invIdx, 1); openStumbleTargetPicker(teamIdx); return; }
-}
-
-function doubleRoll() {
-  state.phase = 'rolling';
-  renderHUD();
-  SFX.roll();
-  const overlay = document.getElementById('dice-overlay');
-  const dice = document.getElementById('dice');
-  overlay.classList.add('show');
-  dice.classList.add('rolling');
-  let ticks = 0;
-  const flicker = setInterval(() => {
-    dice.textContent = 1 + Math.floor(Math.random() * 6);
-    ticks++;
-    if (ticks > 14) {
-      clearInterval(flicker);
-      const r1 = rollD6(state.activeIdx);
-      const r2 = rollD6(state.activeIdx);
-      const total = r1 + r2;
-      dice.textContent = `${r1}+${r2}=${total}`;
-      dice.style.fontSize = '80px';
-      dice.classList.remove('rolling');
-      state.lastRoll = total;
-      later(() => {
-        overlay.classList.remove('show');
-        dice.style.fontSize = '';
-        moveActive(total); // skip the strategic-6 check for double roll, treat as normal move
-      }, 1100);
-    }
-  }, 70);
-}
-
-function openStumbleTargetPicker(byTeamIdx) {
-  const by = state.teams[byTeamIdx];
-  const targets = state.teams.map((t, i) => ({ t, i })).filter(({i}) => i !== byTeamIdx);
-  showCard(`
-    <div class="badge" style="color:${by.color}">${by.mascot} ${by.name} use STUMBLE</div>
-    <h1>Pick a tribe to stumble</h1>
-    <div class="mg-winners">
-      ${targets.map(({t, i}) => `
-        <button class="mg-winner-btn" data-stumble="${i}" style="color:${t.color}">
-          ${t.mascot} ${t.name}
-        </button>
-      `).join('')}
-    </div>
-    <div class="card-actions">
-      <button class="cardbtn neutral" id="stumble-cancel">CANCEL</button>
-    </div>
-  `);
-  document.querySelectorAll('[data-stumble]').forEach(btn => {
-    btn.onclick = () => {
-      const tgt = state.teams[parseInt(btn.dataset.stumble)];
-      if (tgt.shielded) {
-        tgt.shielded = false;
-        toast(`${tgt.name}'s Sanctuary blocked it!`);
-        SFX.land();
-      } else {
-        tgt.skipNext = true;
-        toast(`${tgt.name} will skip their next turn`);
-        SFX.wrong();
-      }
-      closeModal();
-      renderHUD();
-    };
-  });
-  document.getElementById('stumble-cancel').onclick = () => {
-    // Refund the power-up
-    state.teams[byTeamIdx].inventory.push('stumble');
-    closeModal();
+  if (pid === 'freeze') {
+    const opp = state.teams[1 - teamIdx];
+    if (opp.sanctuary) { toast(`${opp.name}'s Sanctuary 🛡️ blocked Freeze!`); team.inventory.splice(invIdx, 1); renderHUD(); SFX.click(); return; }
+    opp.skipNext = true;
+    team.inventory.splice(invIdx, 1);
+    SFX.freeze();
+    toast(`${opp.name} is FROZEN ❄️`);
     renderHUD();
-  };
+    return;
+  }
+  if (pid === 'speedboost') {
+    team.speedBoost = true;
+    team.inventory.splice(invIdx, 1);
+    SFX.powerup();
+    toast(`${team.name} primed Speed Boost ⚡ (+3 on next roll)`);
+    renderHUD();
+    return;
+  }
+  if (pid === 'coindrop') {
+    const opp = state.teams[1 - teamIdx];
+    if (opp.sanctuary) { toast(`${opp.name}'s Sanctuary 🛡️ blocked Coin Drop!`); team.inventory.splice(invIdx, 1); renderHUD(); SFX.click(); return; }
+    const loss = Math.min(COIN_DROP_LOSS, opp.coins);
+    opp.coins -= loss;
+    // Scatter pickups on next COIN_DROP_PICKUPS forward nodes from opponent
+    const amounts = distributeCoins(loss, COIN_DROP_PICKUPS);
+    const nodes = nodesAhead(opp.position, COIN_DROP_PICKUPS);
+    nodes.forEach((nid, i) => {
+      if (amounts[i] > 0) state.coinDrops[nid] = (state.coinDrops[nid] || 0) + amounts[i];
+    });
+    team.inventory.splice(invIdx, 1);
+    SFX.coin();
+    toast(`💸 ${opp.name} dropped ${loss} coins on the trail!`);
+    renderBoard();
+    renderHUD();
+    return;
+  }
+  if (pid === 'banana') {
+    // Pick target tile
+    const opp = state.teams[1 - teamIdx];
+    const targets = nodesAhead(opp.position, 10).filter(nid => BOARD_GRAPH[nid].type !== 'sanctuary' && !state.traps[nid]);
+    if (!targets.length) {
+      toast('No legal tiles for a trap right now.');
+      // refund
+      renderHUD();
+      return;
+    }
+    state.pendingPowerup = { kind: 'banana', teamIdx, invIdx, targets };
+    state.phase = 'awaiting-trap-pick';
+    showTrapPicker(targets);
+    return;
+  }
+  if (pid === 'warp') {
+    const targets = ALL_NODE_IDS.filter(nid => BOARD_GRAPH[nid].type !== 'sanctuary' && nid !== team.position);
+    state.pendingPowerup = { kind: 'warp', teamIdx, invIdx, targets };
+    state.phase = 'awaiting-warp-pick';
+    showWarpPicker(targets);
+    return;
+  }
+}
+
+function distributeCoins(total, slots) {
+  const out = new Array(slots).fill(0);
+  let i = 0;
+  while (total > 0 && i < 1000) {
+    out[i % slots]++;
+    total--;
+    i++;
+  }
+  return out;
+}
+
+function nodesAhead(startId, count) {
+  const out = [];
+  let cur = startId;
+  for (let i = 0; i < count; i++) {
+    const node = BOARD_GRAPH[cur];
+    if (!node || !node.next.length) break;
+    cur = node.next[0]; // always take first branch for projection
+    out.push(cur);
+  }
+  return out;
+}
+
+function showTrapPicker(targets) {
+  renderBoard();
+  const set = new Set(targets);
+  document.querySelectorAll('.tile').forEach(t => {
+    if (set.has(t.dataset.nodeId)) {
+      t.classList.add('trap-pick');
+      t.onclick = () => placeTrap(t.dataset.nodeId);
+    } else {
+      t.classList.add('warp-disabled');
+    }
+  });
+  renderHUD();
+  toast('Click a highlighted tile to place 🍌 trap');
+}
+
+function placeTrap(nodeId) {
+  const pending = state.pendingPowerup;
+  if (!pending || pending.kind !== 'banana') return;
+  const team = state.teams[pending.teamIdx];
+  team.inventory.splice(pending.invIdx, 1);
+  state.traps[nodeId] = { byTeamId: team.id };
+  state.pendingPowerup = null;
+  state.phase = 'awaiting-roll';
+  SFX.powerup();
+  toast(`🍌 Trap placed!`);
+  document.querySelectorAll('.tile').forEach(t => { t.onclick = null; });
+  renderAll();
+}
+
+function showWarpPicker(targets) {
+  renderBoard();
+  const set = new Set(targets);
+  document.querySelectorAll('.tile').forEach(t => {
+    if (set.has(t.dataset.nodeId)) {
+      t.classList.add('warp-target');
+      t.onclick = () => doWarp(t.dataset.nodeId);
+    } else {
+      t.classList.add('warp-disabled');
+    }
+  });
+  renderHUD();
+  toast('Click any tile to warp 🌀');
+}
+
+function doWarp(nodeId) {
+  const pending = state.pendingPowerup;
+  if (!pending || pending.kind !== 'warp') return;
+  const team = state.teams[pending.teamIdx];
+  team.inventory.splice(pending.invIdx, 1);
+  state.pendingPowerup = null;
+  team.position = nodeId;
+  SFX.warp();
+  toast(`🌀 ${team.name} warped!`);
+  document.querySelectorAll('.tile').forEach(t => { t.onclick = null; });
+  renderTokens();
+  // Trigger the landing effect at the destination
+  state.phase = 'moving';
+  later(() => landOn(nodeId), 600);
 }
 
 // ---- Turn management ----
 function passTurn() {
   if (state.won) return;
-  state.activeIdx = (state.activeIdx + 1) % state.teams.length;
+  // Clear sanctuary on the team that just ended their turn
+  const active = state.teams[state.activeIdx];
+  if (active.sanctuary) active.sanctuary = false;
+
+  state.activeIdx = 1 - state.activeIdx;
   if (state.activeIdx === 0) state.turn++;
+
+  // Check turn limit
+  if (state.turn > TURN_LIMIT) {
+    return endGame();
+  }
   state.phase = 'awaiting-roll';
-  state.currentQuestion = null;
+  state.currentTrivia = null;
   state.selectedAnswer = null;
-  state.currentTreasure = null;
   state.currentMinigame = null;
-  state.pendingMove = null;
+  state.minigameStep = null;
   renderAll();
 }
 
-// ---- Victory ----
-function declareWinner(idx) {
+function endGame() {
   state.won = true;
-  state.winner = idx;
   state.phase = 'won';
-  const team = state.teams[idx];
+  const [red, blue] = state.teams;
+  let winnerIdx;
+  if (red.coins > blue.coins)      winnerIdx = 0;
+  else if (blue.coins > red.coins) winnerIdx = 1;
+  else                              winnerIdx = -1;
+  state.winner = winnerIdx;
   SFX.victory();
-  document.getElementById('victory-team').innerHTML = `${team.mascot} ${team.name} WIN!`;
-  document.getElementById('victory-team').style.color = team.color;
+
+  document.getElementById('victory-red').textContent = red.coins;
+  document.getElementById('victory-blue').textContent = blue.coins;
+  const h1 = document.getElementById('victory-team');
+  const h2 = document.getElementById('victory-sub');
+  if (winnerIdx === -1) {
+    h1.textContent = `IT'S A TIE!`;
+    h1.style.color = '#ffd55a';
+    h2.textContent = 'Both teams played hard — well done!';
+  } else {
+    const w = state.teams[winnerIdx];
+    h1.textContent = `${w.mascot} ${w.name} WINS!`;
+    h1.style.color = w.color;
+    h2.textContent = `With ${w.coins} Adventure Coins`;
+  }
   document.getElementById('victory').classList.add('show');
   spawnConfetti();
 }
 
 function spawnConfetti() {
   const victory = document.getElementById('victory');
-  const colors = ['#ffd55a','#ff6b6b','#6abf3c','#4a8fd6','#b34acd'];
+  const colors = ['#ffd55a','#e84a3a','#3a8aff','#6abf3c','#8e3acd'];
   for (let i = 0; i < 100; i++) {
     const c = document.createElement('div');
     c.className = 'confetti';
@@ -1162,8 +1643,8 @@ function spawnConfetti() {
     c.style.top = '-20px';
     c.style.transform = `rotate(${Math.random()*360}deg)`;
     victory.appendChild(c);
-    const dur = 2 + Math.random() * 3;
     if (typeof c.animate === 'function') {
+      const dur = 2 + Math.random() * 3;
       c.animate([
         { transform: c.style.transform + ' translateY(0)' },
         { transform: c.style.transform + ` translateY(${window.innerHeight + 100}px) rotate(${720 + Math.random()*360}deg)` }
@@ -1175,6 +1656,7 @@ function spawnConfetti() {
 function resetGame() {
   cancelPendingTimers();
   history = [];
+  usedTriviaIdx = [];
   state = freshState();
   document.getElementById('victory').classList.remove('show');
   document.getElementById('victory').querySelectorAll('.confetti').forEach(c => c.remove());
@@ -1183,18 +1665,15 @@ function resetGame() {
 }
 
 // =====================================================================
-// MODAL HELPERS
+// MODAL / TOAST HELPERS
 // =====================================================================
 
 function showCard(html) {
   const modal = document.getElementById('modal');
-  const body = document.getElementById('card-body');
-  body.innerHTML = html;
+  document.getElementById('card-body').innerHTML = html;
   modal.classList.add('show');
 }
-function closeModal() {
-  document.getElementById('modal').classList.remove('show');
-}
+function closeModal() { document.getElementById('modal').classList.remove('show'); }
 function closeAllModals() {
   closeModal();
   document.getElementById('dice-overlay').classList.remove('show');
@@ -1216,18 +1695,23 @@ function escapeHtml(s) {
 function onPrimary() {
   ensureAudio();
   switch (state.phase) {
-    case 'awaiting-roll':      return rollDice();
-    case 'awaiting-treasure':  { const btn = document.getElementById('treasure-continue'); if (btn) btn.click(); return; }
+    case 'awaiting-roll':   return rollDice();
+    case 'mg-instructions': { document.getElementById('mg-next-1')?.click(); return; }
+    case 'mg-start-gate':   { document.getElementById('mg-start')?.click(); return; }
+    case 'mg-in-game': {
+      const g = state.currentMinigame;
+      if (g && g.id === 'slow-reveal') { document.getElementById('sr-end')?.click(); return; }
+      document.getElementById('mg-end')?.click();
+      return;
+    }
     default: return;
   }
 }
 
 window.addEventListener('keydown', (e) => {
-  // Ignore typing in inputs (none right now, but defensive)
   if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
   ensureAudio();
 
-  // Victory overlay shortcut
   if (state.won) {
     if (e.key === ' ' || e.key === 'Enter') { e.preventDefault(); resetGame(); }
     return;
@@ -1236,58 +1720,68 @@ window.addEventListener('keydown', (e) => {
   switch (e.key) {
     case ' ': e.preventDefault(); onPrimary(); break;
     case 'Enter':
-      if (state.phase === 'awaiting-judgment') judgeAnswer(true);
+      if (state.phase === 'awaiting-judgment') judgeTrivia(true);
       break;
     case 'Backspace':
-      if (state.phase === 'awaiting-judgment') judgeAnswer(false);
+      if (state.phase === 'awaiting-judgment') judgeTrivia(false);
       break;
-    case '1': case '2': case '3': case '4': {
-      const idx = parseInt(e.key) - 1;
-      if (state.phase === 'awaiting-answer' || state.phase === 'awaiting-judgment') {
-        if (state.currentQuestion && idx < state.currentQuestion.a.length) pickAnswer(idx);
-      } else if (state.phase === 'awaiting-minigame') {
-        if (idx < state.teams.length) {
-          const btn = document.querySelector(`[data-winner="${idx}"]`);
-          if (btn) btn.click();
-        }
-      }
+    case 't': case 'T':
+      if (state.phase === 'awaiting-tf' || state.phase === 'awaiting-judgment') pickTF(true);
       break;
-    }
+    case 'f': case 'F':
+      if (state.phase === 'awaiting-tf' || state.phase === 'awaiting-judgment') pickTF(false);
+      else if (state.phase === 'awaiting-roll') toggleFullscreen();
+      break;
+    case '1':
+      if (state.phase === 'mg-score-award') document.querySelector('[data-winner="0"]')?.click();
+      break;
+    case '2':
+      if (state.phase === 'mg-score-award') document.querySelector('[data-winner="1"]')?.click();
+      break;
+    case 'ArrowRight':
+      if (state.phase === 'awaiting-path-pick') { e.preventDefault(); state._pickPath?.('right'); }
+      else if (state.phase === 'mg-in-game' && state.currentMinigame?.id === 'slow-reveal') { e.preventDefault(); slowRevealStep(); }
+      break;
+    case 'ArrowLeft':
+      if (state.phase === 'awaiting-path-pick') { e.preventDefault(); state._pickPath?.('left'); }
+      break;
     case 'u': case 'U': undo(); break;
     case 'm': case 'M': toggleMute(); break;
-    case 'f': case 'F': toggleFullscreen(); break;
-    case 'Tab': e.preventDefault(); toggleHUD(); break;
     case 'q': case 'Q': {
-      // Manual score adjust: -1 for active team
       snapshot();
-      state.teams[state.activeIdx].score = Math.max(0, state.teams[state.activeIdx].score - 1);
-      toast(`${state.teams[state.activeIdx].name} −1`);
+      state.teams[state.activeIdx].coins = Math.max(0, state.teams[state.activeIdx].coins - 1);
+      toast(`${state.teams[state.activeIdx].name} -1 coin`);
       renderHUD();
       break;
     }
     case 'w': case 'W': {
-      // Manual score adjust: +1 for active team
       snapshot();
-      state.teams[state.activeIdx].score += 1;
-      toast(`${state.teams[state.activeIdx].name} +1`);
+      state.teams[state.activeIdx].coins += 1;
+      toast(`${state.teams[state.activeIdx].name} +1 coin`);
       renderHUD();
       break;
     }
-    case 'ArrowUp': case 'ArrowDown': case 'ArrowLeft': case 'ArrowRight':
-      // Strategic-6 quick keys: ←=back, →=forward, ↓=stay
-      if (state.phase === 'awaiting-strategic-6') {
-        e.preventDefault();
-        if (e.key === 'ArrowRight') resolveStrategic('forward');
-        else if (e.key === 'ArrowLeft') resolveStrategic('back');
-        else if (e.key === 'ArrowDown') resolveStrategic('stay');
+    case 'Tab': e.preventDefault(); toggleHUD(); break;
+    case 'Escape':
+      // Cancel a pending power-up pick
+      if (state.phase === 'awaiting-warp-pick' || state.phase === 'awaiting-trap-pick') {
+        // Refund
+        const p = state.pendingPowerup;
+        if (p) {
+          state.teams[p.teamIdx].inventory.push(p.kind);
+        }
+        state.pendingPowerup = null;
+        state.phase = 'awaiting-roll';
+        renderAll();
+        toast('Cancelled');
       }
       break;
   }
 });
 
 function toggleFullscreen() {
-  if (!document.fullscreenElement) document.documentElement.requestFullscreen().catch(()=>{});
-  else document.exitFullscreen();
+  if (!document.fullscreenElement) document.documentElement.requestFullscreen?.().catch(()=>{});
+  else document.exitFullscreen?.();
 }
 function toggleHUD() {
   state.hudCompact = !state.hudCompact;
@@ -1295,15 +1789,14 @@ function toggleHUD() {
 }
 
 // =====================================================================
-// STAGE SCALING (1920x1080 logical -> viewport)
+// STAGE SCALING
 // =====================================================================
 
 function fitStage() {
   const stage = document.getElementById('stage');
   const sx = window.innerWidth / 1920;
   const sy = window.innerHeight / 1080;
-  const s = Math.min(sx, sy);
-  stage.style.transform = `scale(${s})`;
+  stage.style.transform = `scale(${Math.min(sx, sy)})`;
 }
 window.addEventListener('resize', fitStage);
 
@@ -1321,12 +1814,12 @@ function boot() {
   document.getElementById('btn-hud').onclick = toggleHUD;
   document.getElementById('victory-reset').onclick = resetGame;
 
-  // Test/debug handle (no-op in production use; harmless to expose)
+  // Test/debug handle
   window.__game = {
     get state() { return state; },
-    rollDice, pickAnswer, judgeAnswer, resolveStrategic, awardMinigameWinner,
+    rollDice, pickTF, judgeTrivia, awardMinigameWinner,
     usePowerup, undo, resetGame, passTurn,
-    BOARD_SPACES, QUESTIONS, POWERUPS, MINIGAME_LIBRARY,
+    BOARD_GRAPH, TRIVIA, POWERUPS, MINIGAMES, TEAMS_INIT,
   };
 }
 boot();
