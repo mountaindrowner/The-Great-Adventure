@@ -1,307 +1,255 @@
 import Phaser from 'phaser';
 import { BodyTracker, isPersonValue } from '../tracking/BodyTracker.js';
 
-// Demo board: a fixed grid of tiles. `1` = lava, `0` = safe.
-// Static for the proof — the spawn/crack/collapse cycle is the next milestone.
-const BOARD = [
+/*
+ * 3D-perspective lava floor with the player standing on it.
+ *
+ * The floor is a grid drawn in perspective (recedes toward a horizon). The
+ * player's webcam silhouette is cut out and drawn as an upright billboard
+ * standing on their tile, scaled by depth, with a glowing ring under the feet
+ * that turns red on lava. Collision = which tile the player's feet are over.
+ */
+const BOARD = [          // row 0 = far/back of the floor, row 4 = near/front
   [0, 1, 0, 0, 1, 0],
   [0, 1, 0, 0, 1, 0],
   [0, 0, 0, 1, 0, 0],
   [1, 0, 0, 1, 0, 1],
   [1, 0, 0, 0, 0, 1],
 ];
+const ROWS = BOARD.length;
+const COLS = BOARD[0].length;
+const HALF_W = 6;                 // floor spans worldX in [-6, 6]
+const Z_NEAR = 7, Z_FAR = 22;     // world depth of the near and far edges
+const MIN_PERSON_PIXELS = 60;
 
-// Fraction of a tile that must be covered by person-pixels to count as "stepped on".
-// Low enough to feel responsive, high enough to ignore a stray fingertip.
-const TOUCH_THRESHOLD = 0.08;
-
-const COLOR_SAFE = 0x1f6f4a;
-const COLOR_SAFE_LINE = 0x2fa06a;
-const COLOR_LAVA = 0x7a1414;
-const COLOR_LAVA_LINE = 0xd84a2a;
-const COLOR_LAVA_HOT = 0xff5a2a;
+const C_SAFE = 0x2b7d52, C_SAFE_HOT = 0x49d98a, C_SAFE_LINE = 0x39b074;
+const C_LAVA = 0x8a1f12, C_LAVA_HOT = 0xff6a2a, C_LAVA_LINE = 0xe0552a;
 
 export class GameScene extends Phaser.Scene {
-  constructor() {
-    super('GameScene');
-  }
+  constructor() { super('GameScene'); }
 
   init() {
     this.tracker = null;
-    this.errorMessage = null;
-
-    // Offscreen canvas where we composite the mirror-flipped, background-removed cutout.
+    this.started = false;
     this.cutoutCanvas = document.createElement('canvas');
-    this.cutoutCtx = this.cutoutCanvas.getContext('2d', { willReadFrequently: false });
-
-    this.tiles = [];        // { rect, gfx, isLava, col, row }
-    this.cols = BOARD[0].length;
-    this.rows = BOARD.length;
+    this.cutoutCtx = this.cutoutCanvas.getContext('2d', { willReadFrequently: true });
+    this.cutoutImage = null;
+    this.player = null;
   }
 
-  async create() {
+  create() {
     const { width, height } = this.scale;
+    this.floorGfx = this.add.graphics().setDepth(1);
+    this.ringGfx = this.add.graphics().setDepth(5);
 
-    // --- Board layout: fill the screen with the tile grid ---
-    this.buildBoard(width, height);
-
-    // --- Cutout layer: a single image stretched full-screen, fed from a CanvasTexture ---
-    this.textures.addCanvas('cutout', this.cutoutCanvas);
-    this.cutoutImage = this.add.image(0, 0, 'cutout').setOrigin(0, 0);
-    this.cutoutImage.setDisplaySize(width, height);
-    this.cutoutImage.setDepth(10);
-
-    // --- HUD ---
     this.buildHud(width, height);
+    this.computeProjection(width, height);
+    this.scale.on('resize', (s) => {
+      this.computeProjection(s.width, s.height);
+      this.layoutHud(s.width, s.height);
+    });
 
-    // --- Boot the camera + segmentation engine ---
-    const videoEl = document.getElementById('webcam');
-    this.tracker = new BodyTracker(videoEl);
-    try {
-      this.statusText.setText('Loading model + camera…');
-      await this.tracker.init();
-      this.statusText.setText('Step onto the board!');
-    } catch (err) {
-      this.errorMessage =
-        'Camera/model failed to start.\n' +
-        'Allow camera access and use Chrome on http://localhost.\n\n' +
-        `(${err && err.message ? err.message : err})`;
-      this.showError();
+    const startBtn = document.getElementById('startBtn');
+    if (startBtn) {
+      startBtn.addEventListener('click', () => this.startTracking(), { once: true });
+    } else {
+      // No start overlay (e.g. desktop dev build) — boot directly.
+      this.startTracking();
     }
   }
 
-  buildBoard(width, height) {
-    const tileW = width / this.cols;
-    const tileH = height / this.rows;
+  async startTracking() {
+    if (this.started) return;
+    this.started = true;
+    const boot = document.getElementById('boot');
+    if (boot) boot.innerHTML = '<div class="spinner">Loading model + starting camera…</div>';
+    this.tracker = new BodyTracker(document.getElementById('webcam'));
+    try {
+      await this.tracker.init();
+      if (boot) boot.style.display = 'none';
+      this.statusText.setText('Step into view!');
+    } catch (err) {
+      if (boot) {
+        boot.innerHTML =
+          '<h1>Couldn\'t start the camera</h1><p>Allow camera access, and use an ' +
+          'https:// link (iPhone) or Chrome (desktop).</p><small>' +
+          (err && err.message ? err.message : err) + '</small>';
+      }
+      this.statusText.setText('Camera error');
+    }
+  }
 
-    for (let row = 0; row < this.rows; row++) {
-      for (let col = 0; col < this.cols; col++) {
-        const isLava = BOARD[row][col] === 1;
-        const x = col * tileW;
-        const y = row * tileH;
+  computeProjection(W, H) {
+    const yNear = H * 0.97, yFar = H * 0.30;
+    this.cx = W / 2;
+    this.horizonY = (yFar * Z_FAR - yNear * Z_NEAR) / (Z_FAR - Z_NEAR);
+    this.K = (yNear - this.horizonY) * Z_NEAR;
+    this.backY = this.horizonY + this.K / Z_FAR;
+    this.f = (0.47 * W) * Z_NEAR / HALF_W;
+    this.screenH = H; this.screenW = W;
 
-        const gfx = this.add.graphics();
-        gfx.setDepth(1);
-        const rect = new Phaser.Geom.Rectangle(x, y, tileW, tileH);
-        this.tiles.push({ rect, gfx, isLava, col, row, touched: false });
-        this.paintTile(this.tiles[this.tiles.length - 1], false);
+    this.lineZ = [];
+    for (let k = 0; k <= ROWS; k++) this.lineZ.push(Z_FAR + (Z_NEAR - Z_FAR) * (k / ROWS));
+    this.lineX = [];
+    for (let c = 0; c <= COLS; c++) this.lineX.push(-HALF_W + (2 * HALF_W) * (c / COLS));
+
+    this.tileGeom = [];
+    for (let r = 0; r < ROWS; r++) {
+      for (let c = 0; c < COLS; c++) {
+        const zF = this.lineZ[r], zN = this.lineZ[r + 1];
+        const xL = this.lineX[c], xR = this.lineX[c + 1];
+        const poly = [
+          this.project(xL, zF), this.project(xR, zF),
+          this.project(xR, zN), this.project(xL, zN),
+        ];
+        this.tileGeom.push({ r, c, isLava: BOARD[r][c] === 1, poly });
       }
     }
   }
 
-  paintTile(tile, hot) {
-    const { gfx, rect, isLava } = tile;
-    gfx.clear();
-    let fill, line;
-    if (isLava) {
-      fill = hot ? COLOR_LAVA_HOT : COLOR_LAVA;
-      line = COLOR_LAVA_LINE;
-    } else {
-      fill = COLOR_SAFE;
-      line = COLOR_SAFE_LINE;
-    }
-    gfx.fillStyle(fill, 1);
-    gfx.fillRect(rect.x, rect.y, rect.width, rect.height);
-    gfx.lineStyle(2, line, 0.8);
-    gfx.strokeRect(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2);
+  project(worldX, Z) {
+    return { x: this.cx + (worldX * this.f) / Z, y: this.horizonY + this.K / Z };
   }
 
-  buildHud(width, height) {
-    this.statusText = this.add
-      .text(width / 2, 28, 'Starting…', {
-        fontFamily: 'system-ui, sans-serif',
-        fontSize: '28px',
-        color: '#ffffff',
-        backgroundColor: '#00000088',
-        padding: { x: 14, y: 8 },
-      })
-      .setOrigin(0.5, 0)
-      .setDepth(100);
-
-    // Big verdict in the corner: LAVA! / SAFE
-    this.verdictText = this.add
-      .text(20, height - 20, 'SAFE', {
-        fontFamily: 'system-ui, sans-serif',
-        fontSize: '64px',
-        fontStyle: 'bold',
-        color: '#7CFC7C',
-        backgroundColor: '#00000066',
-        padding: { x: 16, y: 8 },
-      })
-      .setOrigin(0, 1)
-      .setDepth(100);
-
-    // Camera / person indicator + timer, top-left.
-    this.infoText = this.add
-      .text(20, 20, 'camera: starting', {
-        fontFamily: 'system-ui, sans-serif',
-        fontSize: '18px',
-        color: '#cfd6e4',
-        backgroundColor: '#00000066',
-        padding: { x: 10, y: 6 },
-      })
-      .setOrigin(0, 0)
-      .setDepth(100);
-
+  buildHud(W, H) {
+    this.statusText = this.add.text(W / 2, 18, '', {
+      fontFamily: 'system-ui, sans-serif', fontSize: '22px', color: '#ffffff',
+      backgroundColor: '#00000088', padding: { x: 12, y: 7 }, align: 'center',
+    }).setOrigin(0.5, 0).setDepth(100);
+    this.verdictText = this.add.text(16, H - 16, 'SAFE', {
+      fontFamily: 'system-ui, sans-serif', fontSize: '50px', fontStyle: 'bold',
+      color: '#7CFC7C', backgroundColor: '#00000066', padding: { x: 14, y: 7 },
+    }).setOrigin(0, 1).setDepth(100);
+    this.infoText = this.add.text(16, 14, '', {
+      fontFamily: 'system-ui, sans-serif', fontSize: '15px', color: '#cfd6e4',
+      backgroundColor: '#00000066', padding: { x: 9, y: 5 },
+    }).setOrigin(0, 0).setDepth(100);
     this.startTime = this.time.now;
   }
 
-  showError() {
-    if (this.errorText) this.errorText.destroy();
-    this.errorText = this.add
-      .text(this.scale.width / 2, this.scale.height / 2, this.errorMessage, {
-        fontFamily: 'system-ui, sans-serif',
-        fontSize: '22px',
-        color: '#ffd7d7',
-        backgroundColor: '#000000cc',
-        align: 'center',
-        padding: { x: 24, y: 20 },
-      })
-      .setOrigin(0.5)
-      .setDepth(200);
-    this.statusText.setText('Error');
+  layoutHud(W, H) {
+    this.statusText.setPosition(W / 2, 18);
+    this.verdictText.setPosition(16, H - 16);
+    this.infoText.setPosition(16, 14);
   }
 
   update(time) {
     if (!this.tracker || !this.tracker.isReady()) return;
-
-    // 1) Advance segmentation for the current camera frame.
     this.tracker.detect(performance.now());
+    this.updateCutout();
 
-    // 2) Paint the live, mirror-flipped, background-removed cutout.
-    this.drawCutout();
+    let onLava = false, pr = -1, pc = -1;
+    if (this.player) {
+      pc = Math.min(COLS - 1, Math.max(0, Math.floor(this.player.nfx * COLS)));
+      pr = Math.min(ROWS - 1, Math.max(0, Math.floor(this.player.nfy * ROWS)));
+      onLava = BOARD[pr][pc] === 1;
+    }
 
-    // 3) Run pixel-based collision: any person-pixels sitting on a lava tile?
-    const onLava = this.checkCollisions();
-
-    // 4) Update HUD.
+    this.drawFloor(pr, pc);
+    this.drawPlayer(onLava);
     this.updateHud(time, onLava);
   }
 
-  /**
-   * Composite the cutout: mirror-flip the webcam frame, then knock out every
-   * non-person pixel using the segmentation mask as an alpha stencil.
-   */
-  drawCutout() {
-    const tracker = this.tracker;
-    const video = tracker.getVideo();
-    const mask = tracker.getMask();
-    if (!mask || !video.videoWidth) return;
-
-    const mw = tracker.maskWidth;
-    const mh = tracker.maskHeight;
-
-    // Keep the offscreen canvas at the mask resolution (small, fast to read/write).
+  updateCutout() {
+    const t = this.tracker, video = t.getVideo(), mask = t.getMask();
+    if (!mask || !video.videoWidth) { this.player = null; return; }
+    const mw = t.maskWidth, mh = t.maskHeight;
     if (this.cutoutCanvas.width !== mw || this.cutoutCanvas.height !== mh) {
-      this.cutoutCanvas.width = mw;
-      this.cutoutCanvas.height = mh;
+      this.cutoutCanvas.width = mw; this.cutoutCanvas.height = mh;
     }
     const ctx = this.cutoutCtx;
-
-    // Draw the video mirror-flipped (translate + negative scale) at mask size.
     ctx.save();
-    ctx.setTransform(-1, 0, 0, 1, mw, 0); // flip horizontally
+    ctx.setTransform(-1, 0, 0, 1, mw, 0);
     ctx.drawImage(video, 0, 0, mw, mh);
     ctx.restore();
 
-    // Apply the mask (also mirror-flipped, so it lines up) as alpha.
     const frame = ctx.getImageData(0, 0, mw, mh);
     const px = frame.data;
+    let minX = mw, minY = mh, maxX = -1, maxY = -1, count = 0;
+    let footSumX = 0, footRow = -1, footCount = 0;
     for (let y = 0; y < mh; y++) {
       const rowOff = y * mw;
       for (let x = 0; x < mw; x++) {
-        // Mirror the mask lookup to match the flipped video.
         const maskVal = mask[rowOff + (mw - 1 - x)];
         const pi = (rowOff + x) * 4;
-        if (!isPersonValue(maskVal)) {
-          px[pi + 3] = 0; // transparent background
-        } else {
-          // Slight cyan rim tint so the cutout reads clearly against the board.
-          px[pi] = Math.min(255, px[pi] + 10);
-          px[pi + 2] = Math.min(255, px[pi + 2] + 25);
-        }
+        if (!isPersonValue(maskVal)) { px[pi + 3] = 0; continue; }
+        px[pi] = Math.min(255, px[pi] + 8);
+        px[pi + 2] = Math.min(255, px[pi + 2] + 22);
+        count++;
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+        if (y > footRow) { footRow = y; footSumX = x; footCount = 1; }
+        else if (y === footRow) { footSumX += x; footCount++; }
       }
     }
     ctx.putImageData(frame, 0, 0);
 
-    // Push the updated pixels to the GPU texture Phaser is drawing.
-    const tex = this.textures.get('cutout');
-    tex.refresh();
+    if (!this.textures.exists('cutout')) this.textures.addCanvas('cutout', this.cutoutCanvas);
+    this.textures.get('cutout').refresh();
+
+    if (count < MIN_PERSON_PIXELS || maxX < 0) { this.player = null; return; }
+    const footX = footSumX / footCount;
+    this.player = {
+      nfx: footX / mw, nfy: maxY / mh,
+      bx: minX, by: minY, bw: (maxX - minX + 1), bh: (maxY - minY + 1),
+    };
   }
 
-  /**
-   * For each lava tile, sample the (mirror-flipped) mask over the tile's screen
-   * rectangle. If the fraction of person-pixels exceeds the threshold, it's touched.
-   * This is count-agnostic: 1 player or 30, same logic.
-   * Returns true if ANY lava tile is currently touched.
-   */
-  checkCollisions() {
-    const tracker = this.tracker;
-    const mask = tracker.getMask();
-    if (!mask) return false;
-
-    const mw = tracker.maskWidth;
-    const mh = tracker.maskHeight;
-    const { width: sw, height: sh } = this.scale;
-
-    let anyLava = false;
-    const SAMPLE_STEP = 3; // sample every 3rd pixel for speed
-
-    for (const tile of this.tiles) {
-      if (!tile.isLava) continue;
-
-      // Map this tile's screen rect into mask space, mirroring X to match cutout.
-      const r = tile.rect;
-      const mx0 = Math.floor(((sw - (r.x + r.width)) / sw) * mw);
-      const mx1 = Math.ceil(((sw - r.x) / sw) * mw);
-      const my0 = Math.floor((r.y / sh) * mh);
-      const my1 = Math.ceil(((r.y + r.height) / sh) * mh);
-
-      let person = 0;
-      let total = 0;
-      for (let y = my0; y < my1; y += SAMPLE_STEP) {
-        if (y < 0 || y >= mh) continue;
-        const rowOff = y * mw;
-        for (let x = mx0; x < mx1; x += SAMPLE_STEP) {
-          if (x < 0 || x >= mw) continue;
-          total++;
-          if (isPersonValue(mask[rowOff + x])) person++;
-        }
-      }
-
-      const touched = total > 0 && person / total >= TOUCH_THRESHOLD;
-      if (touched !== tile.touched) {
-        tile.touched = touched;
-        this.paintTile(tile, touched);
-      }
-      if (touched) anyLava = true;
+  drawFloor(pr, pc) {
+    const g = this.floorGfx;
+    g.clear();
+    g.fillStyle(0x0a0b12, 1).fillRect(0, 0, this.screenW, this.backY);
+    g.fillStyle(0x3a1408, 0.7).fillRect(0, this.backY - 12, this.screenW, 14);
+    for (const tile of this.tileGeom) {
+      const isPlayerTile = tile.r === pr && tile.c === pc;
+      let fill, line;
+      if (tile.isLava) { fill = isPlayerTile ? C_LAVA_HOT : C_LAVA; line = C_LAVA_LINE; }
+      else { fill = isPlayerTile ? C_SAFE_HOT : C_SAFE; line = C_SAFE_LINE; }
+      g.fillStyle(fill, 1);
+      g.fillPoints(tile.poly, true);
+      g.lineStyle(2, line, 0.9);
+      g.strokePoints(tile.poly, true);
     }
+  }
 
-    return anyLava;
+  drawPlayer(onLava) {
+    const ring = this.ringGfx;
+    ring.clear();
+    if (!this.player) { if (this.cutoutImage) this.cutoutImage.setVisible(false); return; }
+
+    const p = this.player;
+    const worldX = (p.nfx - 0.5) * 2 * HALF_W;
+    const Z = Z_FAR + (Z_NEAR - Z_FAR) * p.nfy;
+    const foot = this.project(worldX, Z);
+    const depth = Z_NEAR / Z;
+
+    const rx = (this.f / Z) * 1.15, ry = rx * 0.4;
+    const glow = onLava ? 0xff6a2a : 0x49d98a;
+    ring.fillStyle(glow, 0.22).fillEllipse(foot.x, foot.y, rx * 2.4, ry * 2.4);
+    ring.fillStyle(glow, 0.45).fillEllipse(foot.x, foot.y, rx * 1.7, ry * 1.7);
+    ring.lineStyle(Math.max(3, rx * 0.18), glow, 1).strokeEllipse(foot.x, foot.y, rx * 2, ry * 2);
+
+    if (!this.cutoutImage && this.textures.exists('cutout')) {
+      this.cutoutImage = this.add.image(0, 0, 'cutout').setOrigin(0, 0).setDepth(6);
+    }
+    if (this.cutoutImage) {
+      const targetH = this.screenH * 0.55 * depth;
+      const s = targetH / p.bh;
+      const footY = foot.y + ry * 0.4;
+      const X = foot.x - (p.bx + p.bw / 2) * s;
+      const Y = footY - (p.by + p.bh) * s;
+      this.cutoutImage.setVisible(true).setCrop(p.bx, p.by, p.bw, p.bh).setScale(s).setPosition(X, Y);
+    }
   }
 
   updateHud(time, onLava) {
     const seconds = ((time - this.startTime) / 1000).toFixed(1);
-    const hasPerson = this.tracker.hasPerson();
-
-    this.infoText.setText(
-      `camera: ok   |   person in view: ${hasPerson ? 'yes' : 'NO'}   |   time: ${seconds}s`
-    );
-
-    if (onLava) {
-      this.verdictText.setText('LAVA!');
-      this.verdictText.setColor('#ff5a2a');
-    } else {
-      this.verdictText.setText('SAFE');
-      this.verdictText.setColor('#7CFC7C');
-    }
-
-    if (!hasPerson) {
-      this.statusText.setText('Step into view of the camera…');
-    } else if (onLava) {
-      this.statusText.setText("You're on the LAVA! 🔥");
-    } else {
-      this.statusText.setText('Nice — stay on the safe tiles!');
-    }
+    const present = !!this.player;
+    this.infoText.setText(`person: ${present ? 'yes' : 'NO'}  |  ${seconds}s`);
+    if (onLava) { this.verdictText.setText('LAVA!'); this.verdictText.setColor('#ff5a2a'); }
+    else { this.verdictText.setText('SAFE'); this.verdictText.setColor('#7CFC7C'); }
+    if (!present) this.statusText.setText('Step into the camera view…');
+    else if (onLava) this.statusText.setText("You're on the LAVA! 🔥");
+    else this.statusText.setText('Nice — stay on the safe tiles!');
   }
 }
