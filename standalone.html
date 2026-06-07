@@ -1,0 +1,306 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>The Great Adventure — Floor Is Lava (webcam demo)</title>
+    <!--
+      SINGLE-FILE VERSION.
+      Just open this file in Google Chrome (double-click it) and allow the camera.
+      No install, no terminal. Needs an internet connection: it loads the game
+      engine (Phaser) and the body-detection model (MediaPipe) from the web.
+
+      The full project (with a proper dev setup) lives alongside this file; this
+      standalone page inlines the same game logic for zero-setup convenience.
+    -->
+    <style>
+      html, body {
+        margin: 0; padding: 0; height: 100%;
+        background: #0b0d12; color: #e6e6e6;
+        font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
+        overflow: hidden;
+      }
+      #game { width: 100vw; height: 100vh; }
+      #webcam { position: fixed; left: -9999px; top: -9999px; width: 1px; height: 1px; }
+      #boot {
+        position: fixed; inset: 0; display: flex; align-items: center;
+        justify-content: center; text-align: center; padding: 24px;
+        background: #0b0d12; z-index: 1000; font-size: 20px; line-height: 1.5;
+      }
+      #boot small { display: block; margin-top: 12px; color: #8b93a7; font-size: 15px; }
+    </style>
+  </head>
+  <body>
+    <div id="game"></div>
+    <video id="webcam" autoplay playsinline muted></video>
+    <div id="boot">
+      Loading game engine + body-detection model…
+      <small>First load can take a few seconds. Use Chrome and allow the camera.</small>
+    </div>
+
+    <!-- Game engine: classic script exposes a global `Phaser`. -->
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+
+    <!-- Game + body tracking. Inline module so it works straight from a file:// open. -->
+    <script type="module">
+      import {
+        FilesetResolver,
+        ImageSegmenter,
+      } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+
+      const isPersonValue = (v) => v !== 0;
+
+      /* ---------- BodyTracker: webcam + full-frame segmentation (crowd-ready) ---------- */
+      class BodyTracker {
+        constructor(videoEl) {
+          this.video = videoEl;
+          this.segmenter = null;
+          this.ready = false;
+          this.mask = null;
+          this.maskWidth = 0;
+          this.maskHeight = 0;
+          this._lastVideoTime = -1;
+        }
+
+        async init() {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            video: { width: { ideal: 1280 }, height: { ideal: 720 }, facingMode: 'user' },
+            audio: false,
+          });
+          this.video.srcObject = stream;
+          await this.video.play();
+          if (!this.video.videoWidth) {
+            await new Promise((res) => (this.video.onloadeddata = () => res()));
+          }
+
+          const fileset = await FilesetResolver.forVisionTasks(
+            'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
+          );
+          this.segmenter = await ImageSegmenter.createFromOptions(fileset, {
+            baseOptions: {
+              modelAssetPath:
+                'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite',
+              delegate: 'GPU',
+            },
+            runningMode: 'VIDEO',
+            outputCategoryMask: true,
+            outputConfidenceMasks: false,
+          });
+          this.ready = true;
+        }
+
+        detect(timestampMs) {
+          if (!this.ready || this.video.currentTime === this._lastVideoTime) return;
+          this._lastVideoTime = this.video.currentTime;
+          this.segmenter.segmentForVideo(this.video, timestampMs, (result) => {
+            const m = result.categoryMask;
+            if (!m) return;
+            this.maskWidth = m.width;
+            this.maskHeight = m.height;
+            this.mask = m.getAsUint8Array();
+            m.close();
+          });
+        }
+
+        hasPerson() {
+          if (!this.mask) return false;
+          for (let i = 0; i < this.mask.length; i += 97) if (this.mask[i] !== 0) return true;
+          return false;
+        }
+        getMask() { return this.mask; }
+        getVideo() { return this.video; }
+        isReady() { return this.ready; }
+      }
+
+      /* ---------- GameScene: board + life-size mirror cutout + pixel collision ---------- */
+      const BOARD = [
+        [0, 1, 0, 0, 1, 0],
+        [0, 1, 0, 0, 1, 0],
+        [0, 0, 0, 1, 0, 0],
+        [1, 0, 0, 1, 0, 1],
+        [1, 0, 0, 0, 0, 1],
+      ];
+      const TOUCH_THRESHOLD = 0.08;
+      const COLOR_SAFE = 0x1f6f4a, COLOR_SAFE_LINE = 0x2fa06a;
+      const COLOR_LAVA = 0x7a1414, COLOR_LAVA_LINE = 0xd84a2a, COLOR_LAVA_HOT = 0xff5a2a;
+
+      class GameScene extends Phaser.Scene {
+        constructor() { super('GameScene'); }
+
+        init() {
+          this.tracker = null;
+          this.cutoutCanvas = document.createElement('canvas');
+          this.cutoutCtx = this.cutoutCanvas.getContext('2d', { willReadFrequently: false });
+          this.tiles = [];
+          this.cols = BOARD[0].length;
+          this.rows = BOARD.length;
+        }
+
+        async create() {
+          const { width, height } = this.scale;
+          this.buildBoard(width, height);
+
+          this.textures.addCanvas('cutout', this.cutoutCanvas);
+          this.cutoutImage = this.add.image(0, 0, 'cutout').setOrigin(0, 0).setDepth(10);
+          this.cutoutImage.setDisplaySize(width, height);
+
+          this.buildHud(width, height);
+
+          const videoEl = document.getElementById('webcam');
+          this.tracker = new BodyTracker(videoEl);
+          try {
+            this.statusText.setText('Loading model + camera…');
+            await this.tracker.init();
+            document.getElementById('boot').style.display = 'none';
+            this.statusText.setText('Step onto the board!');
+          } catch (err) {
+            document.getElementById('boot').innerHTML =
+              'Camera/model failed to start.<br>Allow camera access and use Chrome.<br><small>' +
+              (err && err.message ? err.message : err) + '</small>';
+          }
+        }
+
+        buildBoard(width, height) {
+          const tileW = width / this.cols, tileH = height / this.rows;
+          for (let row = 0; row < this.rows; row++) {
+            for (let col = 0; col < this.cols; col++) {
+              const isLava = BOARD[row][col] === 1;
+              const gfx = this.add.graphics().setDepth(1);
+              const rect = new Phaser.Geom.Rectangle(col * tileW, row * tileH, tileW, tileH);
+              const tile = { rect, gfx, isLava, touched: false };
+              this.tiles.push(tile);
+              this.paintTile(tile, false);
+            }
+          }
+        }
+
+        paintTile(tile, hot) {
+          const { gfx, rect, isLava } = tile;
+          gfx.clear();
+          const fill = isLava ? (hot ? COLOR_LAVA_HOT : COLOR_LAVA) : COLOR_SAFE;
+          const line = isLava ? COLOR_LAVA_LINE : COLOR_SAFE_LINE;
+          gfx.fillStyle(fill, 1);
+          gfx.fillRect(rect.x, rect.y, rect.width, rect.height);
+          gfx.lineStyle(2, line, 0.8);
+          gfx.strokeRect(rect.x + 1, rect.y + 1, rect.width - 2, rect.height - 2);
+        }
+
+        buildHud(width, height) {
+          this.statusText = this.add.text(width / 2, 28, 'Starting…', {
+            fontFamily: 'system-ui, sans-serif', fontSize: '28px', color: '#ffffff',
+            backgroundColor: '#00000088', padding: { x: 14, y: 8 },
+          }).setOrigin(0.5, 0).setDepth(100);
+
+          this.verdictText = this.add.text(20, height - 20, 'SAFE', {
+            fontFamily: 'system-ui, sans-serif', fontSize: '64px', fontStyle: 'bold',
+            color: '#7CFC7C', backgroundColor: '#00000066', padding: { x: 16, y: 8 },
+          }).setOrigin(0, 1).setDepth(100);
+
+          this.infoText = this.add.text(20, 20, 'camera: starting', {
+            fontFamily: 'system-ui, sans-serif', fontSize: '18px', color: '#cfd6e4',
+            backgroundColor: '#00000066', padding: { x: 10, y: 6 },
+          }).setOrigin(0, 0).setDepth(100);
+
+          this.startTime = this.time.now;
+        }
+
+        update(time) {
+          if (!this.tracker || !this.tracker.isReady()) return;
+          this.tracker.detect(performance.now());
+          this.drawCutout();
+          const onLava = this.checkCollisions();
+          this.updateHud(time, onLava);
+        }
+
+        drawCutout() {
+          const t = this.tracker, video = t.getVideo(), mask = t.getMask();
+          if (!mask || !video.videoWidth) return;
+          const mw = t.maskWidth, mh = t.maskHeight;
+          if (this.cutoutCanvas.width !== mw || this.cutoutCanvas.height !== mh) {
+            this.cutoutCanvas.width = mw; this.cutoutCanvas.height = mh;
+          }
+          const ctx = this.cutoutCtx;
+          ctx.save();
+          ctx.setTransform(-1, 0, 0, 1, mw, 0); // mirror flip
+          ctx.drawImage(video, 0, 0, mw, mh);
+          ctx.restore();
+
+          const frame = ctx.getImageData(0, 0, mw, mh);
+          const px = frame.data;
+          for (let y = 0; y < mh; y++) {
+            const rowOff = y * mw;
+            for (let x = 0; x < mw; x++) {
+              const maskVal = mask[rowOff + (mw - 1 - x)];
+              const pi = (rowOff + x) * 4;
+              if (!isPersonValue(maskVal)) {
+                px[pi + 3] = 0;
+              } else {
+                px[pi] = Math.min(255, px[pi] + 10);
+                px[pi + 2] = Math.min(255, px[pi + 2] + 25);
+              }
+            }
+          }
+          ctx.putImageData(frame, 0, 0);
+          this.textures.get('cutout').refresh();
+        }
+
+        checkCollisions() {
+          const t = this.tracker, mask = t.getMask();
+          if (!mask) return false;
+          const mw = t.maskWidth, mh = t.maskHeight;
+          const { width: sw, height: sh } = this.scale;
+          let anyLava = false;
+          const STEP = 3;
+          for (const tile of this.tiles) {
+            if (!tile.isLava) continue;
+            const r = tile.rect;
+            const mx0 = Math.floor(((sw - (r.x + r.width)) / sw) * mw);
+            const mx1 = Math.ceil(((sw - r.x) / sw) * mw);
+            const my0 = Math.floor((r.y / sh) * mh);
+            const my1 = Math.ceil(((r.y + r.height) / sh) * mh);
+            let person = 0, total = 0;
+            for (let y = my0; y < my1; y += STEP) {
+              if (y < 0 || y >= mh) continue;
+              const rowOff = y * mw;
+              for (let x = mx0; x < mx1; x += STEP) {
+                if (x < 0 || x >= mw) continue;
+                total++;
+                if (isPersonValue(mask[rowOff + x])) person++;
+              }
+            }
+            const touched = total > 0 && person / total >= TOUCH_THRESHOLD;
+            if (touched !== tile.touched) { tile.touched = touched; this.paintTile(tile, touched); }
+            if (touched) anyLava = true;
+          }
+          return anyLava;
+        }
+
+        updateHud(time, onLava) {
+          const seconds = ((time - this.startTime) / 1000).toFixed(1);
+          const hasPerson = this.tracker.hasPerson();
+          this.infoText.setText(
+            `camera: ok   |   person in view: ${hasPerson ? 'yes' : 'NO'}   |   time: ${seconds}s`
+          );
+          if (onLava) { this.verdictText.setText('LAVA!'); this.verdictText.setColor('#ff5a2a'); }
+          else { this.verdictText.setText('SAFE'); this.verdictText.setColor('#7CFC7C'); }
+          if (!hasPerson) this.statusText.setText('Step into view of the camera…');
+          else if (onLava) this.statusText.setText("You're on the LAVA! 🔥");
+          else this.statusText.setText('Nice — stay on the safe tiles!');
+        }
+      }
+
+      new Phaser.Game({
+        type: Phaser.AUTO,
+        parent: 'game',
+        backgroundColor: '#0b0d12',
+        scale: {
+          mode: Phaser.Scale.RESIZE,
+          autoCenter: Phaser.Scale.CENTER_BOTH,
+          width: '100%',
+          height: '100%',
+        },
+        scene: [GameScene],
+      });
+    </script>
+  </body>
+</html>
