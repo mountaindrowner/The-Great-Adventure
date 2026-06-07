@@ -2,432 +2,707 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta
-      name="viewport"
-      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
-    />
+    <meta name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
-    <title>Floor Is Lava — webcam demo</title>
+    <title>Floor Is Lava — Ancient Dungeon</title>
     <!--
-      SINGLE-FILE VERSION. Works on iPhone (Safari) and desktop (Chrome).
+      SINGLE-FILE 3D version. Works on iPhone (Safari) and desktop (Chrome).
+      Open from an https:// link (iOS won't give the camera to a downloaded file).
+      Flow: Start -> Calibrate (tap 4 floor corners) -> pick mode -> play rounds.
+      Libraries (Three.js + MediaPipe) load from CDN; needs internet on first load.
 
-      iPhone: open from an https:// web link (iOS won't give the camera to a
-      downloaded file). Prop the phone up, angled down at your play area, tap
-      Start, allow the camera, then step around.
-
-      Needs internet: it loads the game engine (Phaser) and body-detection
-      model (MediaPipe) from the web.
+      Code is sectioned with /* ==== Name ==== */ banners that mirror the src/
+      module files of the same name, to keep the two copies conceptually in sync.
     -->
     <style>
       html, body {
-        margin: 0; padding: 0;
-        width: 100%; height: 100dvh; min-height: 100dvh;
-        background: #0b0d12; color: #e6e6e6;
+        margin: 0; padding: 0; width: 100%; height: 100dvh; min-height: 100dvh;
+        background: #07060a; color: #e9e4dc; overflow: hidden;
         font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
-        overflow: hidden;
-        -webkit-user-select: none; user-select: none;
-        -webkit-tap-highlight-color: transparent;
+        -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
       }
-      #game { width: 100vw; height: 100dvh; }
+      #stage, #calibCanvas { position: fixed; inset: 0; width: 100vw; height: 100dvh; display: block; }
+      #stage { z-index: 1; }
+      #calibCanvas { z-index: 2; display: none; touch-action: none; }
       #webcam { position: fixed; left: -9999px; top: -9999px; width: 1px; height: 1px; }
-      #boot {
-        position: fixed; inset: 0; z-index: 1000;
-        display: flex; flex-direction: column; align-items: center; justify-content: center;
-        text-align: center; padding: 24px calc(24px + env(safe-area-inset-right)) 24px calc(24px + env(safe-area-inset-left));
-        background: radial-gradient(circle at 50% 35%, #15303a, #0b0d12 70%);
+
+      .screen {
+        position: fixed; inset: 0; z-index: 10; display: none;
+        flex-direction: column; align-items: center; justify-content: center;
+        text-align: center; padding: 28px calc(24px + env(safe-area-inset-right)) 28px calc(24px + env(safe-area-inset-left));
+        background: radial-gradient(circle at 50% 32%, rgba(40,22,12,0.92), rgba(7,6,10,0.96) 72%);
       }
-      #boot h1 { font-size: 30px; margin: 0 0 8px; font-weight: 800; letter-spacing: 0.5px; }
-      #boot p { font-size: 17px; line-height: 1.5; color: #c7d0e0; max-width: 32ch; margin: 6px 0; }
-      #startBtn {
-        margin-top: 22px; padding: 18px 40px; font-size: 22px; font-weight: 700;
-        color: #08130d; background: #7CFC7C; border: none; border-radius: 14px;
-        box-shadow: 0 6px 0 #3aa83a; cursor: pointer; touch-action: manipulation;
+      .screen.show { display: flex; }
+      h1 { font-size: 30px; margin: 0 0 6px; font-weight: 800; letter-spacing: .5px; }
+      p  { font-size: 17px; line-height: 1.5; color: #d6cdbf; max-width: 32ch; margin: 6px 0; }
+      .btn {
+        margin-top: 18px; padding: 16px 38px; font-size: 21px; font-weight: 700;
+        color: #1a0d05; background: #ffb347; border: none; border-radius: 14px;
+        box-shadow: 0 6px 0 #b76f1c; cursor: pointer; touch-action: manipulation;
       }
-      #startBtn:active { transform: translateY(3px); box-shadow: 0 3px 0 #3aa83a; }
-      #boot small { display: block; margin-top: 18px; color: #7d8699; font-size: 13px; max-width: 34ch; }
-      .spinner { font-size: 18px; color: #c7d0e0; }
+      .btn:active { transform: translateY(3px); box-shadow: 0 3px 0 #b76f1c; }
+      .btn.green { background: #6fdc8c; box-shadow: 0 6px 0 #2f9b52; }
+      .btn.green:active { box-shadow: 0 3px 0 #2f9b52; }
+      .btn.ghost { background: #2a2630; color: #e9e4dc; box-shadow: 0 6px 0 #15131a; }
+      .row { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
+      small { display: block; margin-top: 16px; color: #8a8170; font-size: 13px; max-width: 34ch; }
+
+      /* Calibration overlay UI */
+      #calibUi { position: fixed; inset: 0; z-index: 3; display: none; pointer-events: none; }
+      #calibUi.show { display: block; }
+      #calibHint {
+        position: absolute; top: calc(14px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
+        background: rgba(0,0,0,.6); padding: 10px 16px; border-radius: 10px; font-size: 16px;
+        text-align: center; max-width: 90vw;
+      }
+      #calibHint b { color: #ffd27a; }
+      #calibBtns {
+        position: absolute; bottom: calc(20px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
+        display: flex; gap: 12px; pointer-events: auto;
+      }
+      #calibBtns .btn { margin-top: 0; padding: 12px 24px; font-size: 17px; }
+
+      /* In-game HUD (DOM overlay over the Three canvas) */
+      #hud { position: fixed; inset: 0; z-index: 5; display: none; pointer-events: none; }
+      #hud.show { display: block; }
+      #hudTop {
+        position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 0; right: 0;
+        display: flex; justify-content: space-between; align-items: flex-start;
+        padding: 0 16px;
+      }
+      .pill { background: rgba(0,0,0,.55); padding: 8px 14px; border-radius: 12px; font-size: 16px; font-weight: 600; }
+      #timer { font-size: 30px; font-weight: 800; }
+      #banner {
+        position: absolute; top: 38%; left: 50%; transform: translate(-50%,-50%);
+        font-size: 44px; font-weight: 900; letter-spacing: 1px; text-align: center;
+        text-shadow: 0 3px 12px rgba(0,0,0,.8); opacity: 0; transition: opacity .25s; padding: 0 16px;
+      }
+      #verdict {
+        position: absolute; left: 16px; bottom: calc(18px + env(safe-area-inset-bottom));
+        font-size: 40px; font-weight: 900; text-shadow: 0 2px 8px rgba(0,0,0,.8);
+      }
+      #fps { position: absolute; right: 16px; bottom: calc(18px + env(safe-area-inset-bottom)); font-size: 12px; color: #7d7466; }
     </style>
   </head>
   <body>
-    <div id="game"></div>
+    <canvas id="stage"></canvas>
+    <canvas id="calibCanvas"></canvas>
     <video id="webcam" autoplay playsinline muted></video>
 
-    <div id="boot">
+    <!-- Boot / Start -->
+    <div id="boot" class="screen show">
       <h1>🌋 Floor Is Lava</h1>
-      <p>Prop your phone up high, angled down at your play space, so it can see your whole body.</p>
-      <p>Stand on <b style="color:#7CFC7C">green</b> = safe. Step on <b style="color:#ff6a3a">red</b> = lava!</p>
-      <button id="startBtn">Start</button>
+      <p>Ancient-dungeon survival. Prop your phone up high, angled down at your play area so it sees your whole body.</p>
+      <button id="startBtn" class="btn">Start</button>
       <small>Tap Start, then allow camera access. Needs internet on first load.</small>
     </div>
 
-    <script src="https://cdn.jsdelivr.net/npm/phaser@3.80.1/dist/phaser.min.js"></script>
+    <!-- Calibration overlay UI (drawn over #calibCanvas live camera) -->
+    <div id="calibUi">
+      <div id="calibHint">Tap the <b>4 corners</b> of your play floor:<br><b id="cornerLabel">FAR-LEFT</b></div>
+      <div id="calibBtns">
+        <button id="calibRedo" class="btn ghost">Redo</button>
+        <button id="calibConfirm" class="btn green">Confirm</button>
+      </div>
+    </div>
+
+    <!-- Mode select -->
+    <div id="modeselect" class="screen">
+      <h1>Choose a mode</h1>
+      <div class="row">
+        <button id="modeLava" class="btn">🌋 Floor Is Lava</button>
+      </div>
+      <small>More modes later. For now, survive the collapsing dungeon.</small>
+    </div>
+
+    <!-- Game over -->
+    <div id="gameover" class="screen">
+      <h1 id="goTitle">You survived!</h1>
+      <p id="goSub"></p>
+      <div class="row">
+        <button id="goReplay" class="btn green">Play again</button>
+        <button id="goRecalib" class="btn ghost">Recalibrate</button>
+      </div>
+    </div>
+
+    <!-- In-game HUD -->
+    <div id="hud">
+      <div id="hudTop">
+        <div class="pill" id="roundPill">Round 1</div>
+        <div class="pill" id="timer">15</div>
+        <div class="pill" id="scorePill">Score 0</div>
+      </div>
+      <div id="banner"></div>
+      <div id="verdict"></div>
+      <div id="fps"></div>
+    </div>
 
     <script type="module">
-      import {
-        FilesetResolver,
-        ImageSegmenter,
-      } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
+      import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js';
+      import { FilesetResolver, ImageSegmenter } from 'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14';
 
-      const isPersonValue = (v) => v !== 0;
+      const DEBUG = new URLSearchParams(location.search).has('debug');
+      const $ = (id) => document.getElementById(id);
 
-      /* ---------- BodyTracker: webcam + full-frame segmentation (crowd-ready) ---------- */
+      /* ===================== Constants ===================== */
+      const COLS = 6, ROWS = 6;            // grid: columns (lateral) x rows (depth)
+      const BLOCK = 1.0;                   // block footprint (world units)
+      const BLOCK_H = 0.6;                 // block height
+      const MIN_PERSON_PIXELS = 60;
+      const UNIT_QUAD = [ {x:0,y:0}, {x:1,y:0}, {x:1,y:1}, {x:0,y:1} ]; // FL, FR, NR, NL
+      const CORNER_LABELS = ['FAR-LEFT','FAR-RIGHT','NEAR-RIGHT','NEAR-LEFT'];
+
+      /* ===================== BodyTracker (reused) ===================== */
       class BodyTracker {
         constructor(videoEl) {
-          this.video = videoEl;
-          this.segmenter = null;
-          this.ready = false;
-          this.mask = null;
-          this.maskWidth = 0;
-          this.maskHeight = 0;
-          this._lastVideoTime = -1;
+          this.video = videoEl; this.segmenter = null; this.ready = false;
+          this.mask = null; this.maskWidth = 0; this.maskHeight = 0; this._lastVideoTime = -1;
         }
-
         async init() {
           const stream = await navigator.mediaDevices.getUserMedia({
-            video: { width: { ideal: 960 }, height: { ideal: 720 }, facingMode: 'user' },
-            audio: false,
+            video: { width: { ideal: 960 }, height: { ideal: 720 }, facingMode: 'user' }, audio: false,
           });
-          this.video.srcObject = stream;
-          this.video.setAttribute('playsinline', '');
+          this.video.srcObject = stream; this.video.setAttribute('playsinline', '');
           await this.video.play();
-          if (!this.video.videoWidth) {
-            await new Promise((res) => (this.video.onloadeddata = () => res()));
-          }
-
+          if (!this.video.videoWidth) await new Promise((r) => (this.video.onloadeddata = () => r()));
           const fileset = await FilesetResolver.forVisionTasks(
-            'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
-          );
+            'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
           const modelAssetPath =
             'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite';
-          try {
-            this.segmenter = await ImageSegmenter.createFromOptions(fileset, {
-              baseOptions: { modelAssetPath, delegate: 'GPU' },
-              runningMode: 'VIDEO', outputCategoryMask: true, outputConfidenceMasks: false,
-            });
-          } catch (gpuErr) {
-            this.segmenter = await ImageSegmenter.createFromOptions(fileset, {
-              baseOptions: { modelAssetPath, delegate: 'CPU' },
-              runningMode: 'VIDEO', outputCategoryMask: true, outputConfidenceMasks: false,
-            });
-          }
+          const opts = (delegate) => ({
+            baseOptions: { modelAssetPath, delegate },
+            runningMode: 'VIDEO', outputCategoryMask: true, outputConfidenceMasks: false,
+          });
+          try { this.segmenter = await ImageSegmenter.createFromOptions(fileset, opts('GPU')); }
+          catch (e) { this.segmenter = await ImageSegmenter.createFromOptions(fileset, opts('CPU')); }
           this.ready = true;
         }
-
-        detect(timestampMs) {
+        detect(ts) {
           if (!this.ready || this.video.currentTime === this._lastVideoTime) return;
           this._lastVideoTime = this.video.currentTime;
-          this.segmenter.segmentForVideo(this.video, timestampMs, (result) => {
-            const m = result.categoryMask;
-            if (!m) return;
-            this.maskWidth = m.width;
-            this.maskHeight = m.height;
-            this.mask = m.getAsUint8Array();
-            m.close();
+          this.segmenter.segmentForVideo(this.video, ts, (res) => {
+            const m = res.categoryMask; if (!m) return;
+            this.maskWidth = m.width; this.maskHeight = m.height; this.mask = m.getAsUint8Array(); m.close();
           });
         }
-
-        getMask() { return this.mask; }
-        getVideo() { return this.video; }
         isReady() { return this.ready; }
       }
+      const isPerson = (v) => v !== 0;
 
-      /* =====================================================================
-         GameScene — 3D-perspective lava floor with the player standing on it.
-
-         The floor is a grid drawn in perspective (recedes toward a horizon).
-         The player's webcam silhouette is cut out and drawn as an upright
-         billboard standing on their tile, scaled by depth, with a glowing
-         ring under their feet that turns red on lava.
-         ===================================================================== */
-      const BOARD = [          // row 0 = far/back of the floor, row 4 = near/front
-        [0, 1, 0, 0, 1, 0],
-        [0, 1, 0, 0, 1, 0],
-        [0, 0, 0, 1, 0, 0],
-        [1, 0, 0, 1, 0, 1],
-        [1, 0, 0, 0, 0, 1],
-      ];
-      const ROWS = BOARD.length;        // depth
-      const COLS = BOARD[0].length;     // lateral
-      const HALF_W = 6;                 // floor spans worldX in [-6, 6]
-      const Z_NEAR = 7, Z_FAR = 22;     // world depth of the near and far edges
-      const MIN_PERSON_PIXELS = 60;     // ignore noise blobs
-
-      // Colors
-      const C_SAFE = 0x2b7d52, C_SAFE_HOT = 0x49d98a, C_SAFE_LINE = 0x39b074;
-      const C_LAVA = 0x8a1f12, C_LAVA_HOT = 0xff6a2a, C_LAVA_LINE = 0xe0552a;
-
-      class GameScene extends Phaser.Scene {
-        constructor() { super('GameScene'); }
-
-        init() {
-          this.tracker = null;
-          this.started = false;
-
-          // Offscreen: mask-applied, mirror-flipped webcam (transparent background).
-          this.cutoutCanvas = document.createElement('canvas');
-          this.cutoutCtx = this.cutoutCanvas.getContext('2d', { willReadFrequently: true });
-
-          // Latest detected player footprint (normalized 0..1 in mirrored cutout space).
-          this.player = null; // { nfx, nfy, bx, by, bw, bh }
+      /* ===================== Homography (plain JS) ===================== */
+      function solve8x8(A, b) {
+        const n = 8, M = A.map((r, i) => [...r, b[i]]);
+        for (let col = 0; col < n; col++) {
+          let p = col;
+          for (let r = col + 1; r < n; r++) if (Math.abs(M[r][col]) > Math.abs(M[p][col])) p = r;
+          [M[col], M[p]] = [M[p], M[col]];
+          const pv = M[col][col];
+          if (Math.abs(pv) < 1e-12) return null;            // singular -> degenerate quad
+          for (let c = col; c <= n; c++) M[col][c] /= pv;
+          for (let r = 0; r < n; r++) { if (r === col) continue; const f = M[r][col];
+            for (let c = col; c <= n; c++) M[r][c] -= f * M[col][c]; }
         }
-
-        create() {
-          const { width, height } = this.scale;
-
-          this.floorGfx = this.add.graphics().setDepth(1);
-          this.ringGfx = this.add.graphics().setDepth(5);
-          this.cutoutImage = null; // created lazily once we know the mask size
-
-          this.buildHud(width, height);
-          this.computeProjection(width, height);
-
-          this.scale.on('resize', (s) => {
-            this.computeProjection(s.width, s.height);
-            this.layoutHud(s.width, s.height);
-          });
-
-          document.getElementById('startBtn')
-            .addEventListener('click', () => this.startTracking(), { once: true });
+        return M.map((r) => r[n]);
+      }
+      function computeHomography(src, dst) {
+        const A = [], b = [];
+        for (let i = 0; i < 4; i++) {
+          const X = src[i].x, Y = src[i].y, u = dst[i].x, v = dst[i].y;
+          A.push([X, Y, 1, 0, 0, 0, -u * X, -u * Y]); b.push(u);
+          A.push([0, 0, 0, X, Y, 1, -v * X, -v * Y]); b.push(v);
         }
+        const h = solve8x8(A, b); if (!h) return null;
+        return [h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7], 1];
+      }
+      function applyHomography(H, x, y) {
+        const w = H[6] * x + H[7] * y + H[8];
+        return { x: (H[0] * x + H[1] * y + H[2]) / w, y: (H[3] * x + H[4] * y + H[5]) / w };
+      }
+      const quadArea = (q) => {
+        let a = 0; for (let i = 0; i < 4; i++) { const p = q[i], n = q[(i + 1) % 4]; a += p.x * n.y - n.x * p.y; }
+        return Math.abs(a) / 2;
+      };
 
-        async startTracking() {
-          if (this.started) return;
-          this.started = true;
-          const boot = document.getElementById('boot');
-          boot.innerHTML = '<div class="spinner">Loading model + starting camera…</div>';
-          this.tracker = new BodyTracker(document.getElementById('webcam'));
-          try {
-            await this.tracker.init();
-            boot.style.display = 'none';
-            this.statusText.setText('Step into view!');
-          } catch (err) {
-            boot.innerHTML =
-              '<h1>Couldn\'t start the camera</h1>' +
-              '<p>Allow camera access, and make sure this is an https:// link (iPhone) ' +
-              'or opened in Chrome (desktop).</p><small>' +
-              (err && err.message ? err.message : err) + '</small>';
-          }
+      /* ===================== FloorMapping ===================== */
+      class FloorMapping {
+        constructor(imgCorners) {                 // corners in normalized mirrored-image space [0,1]
+          this.corners = imgCorners;
+          this.H = computeHomography(imgCorners, UNIT_QUAD);
+          this.Hinv = computeHomography(UNIT_QUAD, imgCorners);
         }
-
-        /* ---- Perspective projection of the floor plane ----
-           A floor point (worldX lateral, Z depth) projects to:
-             screenX = cx + worldX * f / Z
-             screenY = horizonY + K / Z
-           Solved so the near edge sits low on screen and the far edge high. */
-        computeProjection(W, H) {
-          const yNear = H * 0.97, yFar = H * 0.30;
-          this.cx = W / 2;
-          this.horizonY = (yFar * Z_FAR - yNear * Z_NEAR) / (Z_FAR - Z_NEAR);
-          this.K = (yNear - this.horizonY) * Z_NEAR;
-          this.backY = this.horizonY + this.K / Z_FAR; // screen-y of the floor's far edge
-          // Horizontal focal length: near edge half-width fills ~94% of the screen.
-          this.f = (0.47 * W) * Z_NEAR / HALF_W;
-          this.screenH = H; this.screenW = W;
-
-          // World coordinates of grid lines.
-          this.lineZ = [];
-          for (let k = 0; k <= ROWS; k++) this.lineZ.push(Z_FAR + (Z_NEAR - Z_FAR) * (k / ROWS));
-          this.lineX = [];
-          for (let c = 0; c <= COLS; c++) this.lineX.push(-HALF_W + (2 * HALF_W) * (c / COLS));
-
-          // Pre-project every tile's 4 corners (far rows first for painter's order).
-          this.tileGeom = [];
-          for (let r = 0; r < ROWS; r++) {
-            for (let c = 0; c < COLS; c++) {
-              const zF = this.lineZ[r], zN = this.lineZ[r + 1];
-              const xL = this.lineX[c], xR = this.lineX[c + 1];
-              const poly = [
-                this.project(xL, zF), this.project(xR, zF),
-                this.project(xR, zN), this.project(xL, zN),
-              ];
-              this.tileGeom.push({ r, c, isLava: BOARD[r][c] === 1, poly });
-            }
-          }
+        valid() { return this.H && this.Hinv && quadArea(this.corners) > 0.01; }
+        mapFootToGrid(nx, ny) {                    // normalized image -> (u,v) grid
+          const g = applyHomography(this.H, nx, ny);
+          return { u: g.x, v: g.y };
         }
+        gridToImg(u, v) { return applyHomography(this.Hinv, u, v); }
+      }
 
-        project(worldX, Z) {
-          return { x: this.cx + (worldX * this.f) / Z, y: this.horizonY + this.K / Z };
+      /* ===================== CutoutBuilder ===================== */
+      // Builds a mask-applied, mirror-flipped cutout canvas + the player's bbox & foot point.
+      class CutoutBuilder {
+        constructor() {
+          this.canvas = document.createElement('canvas');
+          this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
+          this.player = null;     // { nfx, nfy (normalized foot), bx,by,bw,bh (px) }
+          this.mw = 0; this.mh = 0;
         }
-
-        buildHud(W, H) {
-          this.statusText = this.add.text(W / 2, 18, '', {
-            fontFamily: 'system-ui, sans-serif', fontSize: '22px', color: '#ffffff',
-            backgroundColor: '#00000088', padding: { x: 12, y: 7 }, align: 'center',
-          }).setOrigin(0.5, 0).setDepth(100);
-
-          this.verdictText = this.add.text(16, H - 16, 'SAFE', {
-            fontFamily: 'system-ui, sans-serif', fontSize: '50px', fontStyle: 'bold',
-            color: '#7CFC7C', backgroundColor: '#00000066', padding: { x: 14, y: 7 },
-          }).setOrigin(0, 1).setDepth(100);
-
-          this.infoText = this.add.text(16, 14, '', {
-            fontFamily: 'system-ui, sans-serif', fontSize: '15px', color: '#cfd6e4',
-            backgroundColor: '#00000066', padding: { x: 9, y: 5 },
-          }).setOrigin(0, 0).setDepth(100);
-
-          this.startTime = this.time.now;
-        }
-
-        layoutHud(W, H) {
-          this.statusText.setPosition(W / 2, 18);
-          this.verdictText.setPosition(16, H - 16);
-          this.infoText.setPosition(16, 14);
-        }
-
-        update(time) {
-          if (!this.tracker || !this.tracker.isReady()) return;
-          this.tracker.detect(performance.now());
-          this.updateCutout();          // builds cutout + finds the player's footprint
-
-          // Which tile is the player standing on?
-          let onLava = false, pr = -1, pc = -1;
-          if (this.player) {
-            pc = Math.min(COLS - 1, Math.max(0, Math.floor(this.player.nfx * COLS)));
-            pr = Math.min(ROWS - 1, Math.max(0, Math.floor(this.player.nfy * ROWS)));
-            onLava = BOARD[pr][pc] === 1;
-          }
-
-          this.drawFloor(pr, pc, onLava);
-          this.drawPlayer(onLava);
-          this.updateHud(time, onLava);
-        }
-
-        /* Build the mask-applied mirrored cutout AND measure the player's
-           bounding box + foot position in one pass. */
-        updateCutout() {
-          const t = this.tracker, video = t.getVideo(), mask = t.getMask();
+        update(tracker) {
+          const video = tracker.video, mask = tracker.mask;
           if (!mask || !video.videoWidth) { this.player = null; return; }
-          const mw = t.maskWidth, mh = t.maskHeight;
-
-          if (this.cutoutCanvas.width !== mw || this.cutoutCanvas.height !== mh) {
-            this.cutoutCanvas.width = mw; this.cutoutCanvas.height = mh;
-          }
-          const ctx = this.cutoutCtx;
-          ctx.save();
-          ctx.setTransform(-1, 0, 0, 1, mw, 0); // mirror flip
-          ctx.drawImage(video, 0, 0, mw, mh);
-          ctx.restore();
-
-          const frame = ctx.getImageData(0, 0, mw, mh);
-          const px = frame.data;
-          let minX = mw, minY = mh, maxX = -1, maxY = -1, count = 0;
-          let footSumX = 0, footRow = -1, footCount = 0;
-
+          const mw = tracker.maskWidth, mh = tracker.maskHeight; this.mw = mw; this.mh = mh;
+          if (this.canvas.width !== mw || this.canvas.height !== mh) { this.canvas.width = mw; this.canvas.height = mh; }
+          const ctx = this.ctx;
+          ctx.save(); ctx.setTransform(-1, 0, 0, 1, mw, 0); ctx.drawImage(video, 0, 0, mw, mh); ctx.restore();
+          const frame = ctx.getImageData(0, 0, mw, mh); const px = frame.data;
+          let minX = mw, minY = mh, maxX = -1, maxY = -1, count = 0, footSumX = 0, footRow = -1, footCount = 0;
           for (let y = 0; y < mh; y++) {
-            const rowOff = y * mw;
+            const ro = y * mw;
             for (let x = 0; x < mw; x++) {
-              const maskVal = mask[rowOff + (mw - 1 - x)]; // mirror the mask lookup
-              const pi = (rowOff + x) * 4;
-              if (!isPersonValue(maskVal)) { px[pi + 3] = 0; continue; }
-              // person pixel
-              px[pi] = Math.min(255, px[pi] + 8);
-              px[pi + 2] = Math.min(255, px[pi + 2] + 22);
+              const mv = mask[ro + (mw - 1 - x)]; const pi = (ro + x) * 4;
+              if (!isPerson(mv)) { px[pi + 3] = 0; continue; }
+              px[pi] = Math.min(255, px[pi] + 8); px[pi + 2] = Math.min(255, px[pi + 2] + 22);
               count++;
-              if (x < minX) minX = x; if (x > maxX) maxX = x;
-              if (y < minY) minY = y; if (y > maxY) maxY = y;
-              // accumulate feet: pixels on the current lowest row band
-              if (y > footRow) { footRow = y; footSumX = x; footCount = 1; }
-              else if (y === footRow) { footSumX += x; footCount++; }
+              if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y;
+              if (y > footRow) { footRow = y; footSumX = x; footCount = 1; } else if (y === footRow) { footSumX += x; footCount++; }
             }
           }
           ctx.putImageData(frame, 0, 0);
-
-          // Register/refresh the stable cutout texture (mask size is constant).
-          if (!this.textures.exists('cutout')) this.textures.addCanvas('cutout', this.cutoutCanvas);
-          this.textures.get('cutout').refresh();
-
           if (count < MIN_PERSON_PIXELS || maxX < 0) { this.player = null; return; }
-
           const footX = footSumX / footCount;
-          this.player = {
-            nfx: footX / mw,
-            nfy: maxY / mh,
-            bx: minX, by: minY, bw: (maxX - minX + 1), bh: (maxY - minY + 1),
-          };
-        }
-
-        drawFloor(pr, pc, onLava) {
-          const g = this.floorGfx;
-          g.clear();
-          // Back wall + horizon glow (simple ambiance; full theme is a later pass).
-          g.fillStyle(0x0a0b12, 1).fillRect(0, 0, this.screenW, this.backY);
-          g.fillStyle(0x3a1408, 0.7).fillRect(0, this.backY - 12, this.screenW, 14);
-
-          for (const tile of this.tileGeom) {
-            const isPlayerTile = tile.r === pr && tile.c === pc;
-            let fill, line;
-            if (tile.isLava) { fill = isPlayerTile ? C_LAVA_HOT : C_LAVA; line = C_LAVA_LINE; }
-            else { fill = isPlayerTile ? C_SAFE_HOT : C_SAFE; line = C_SAFE_LINE; }
-            g.fillStyle(fill, 1);
-            g.fillPoints(tile.poly, true);
-            g.lineStyle(2, line, 0.9);
-            g.strokePoints(tile.poly, true);
-          }
-        }
-
-        drawPlayer(onLava) {
-          const ring = this.ringGfx;
-          ring.clear();
-          if (!this.player) { if (this.cutoutImage) this.cutoutImage.setVisible(false); return; }
-
-          const p = this.player;
-          // Continuous floor position from the foot point.
-          const worldX = (p.nfx - 0.5) * 2 * HALF_W;
-          const Z = Z_FAR + (Z_NEAR - Z_FAR) * p.nfy; // nfy 0=far -> Z_FAR, 1=near -> Z_NEAR
-          const foot = this.project(worldX, Z);
-          const depth = Z_NEAR / Z; // 1 at nearest, smaller when far
-
-          // Glowing ring under the feet.
-          const rx = (this.f / Z) * 1.15, ry = rx * 0.4;
-          const safe = !onLava;
-          const glow = safe ? 0x49d98a : 0xff6a2a;
-          ring.fillStyle(glow, 0.22).fillEllipse(foot.x, foot.y, rx * 2.4, ry * 2.4);
-          ring.fillStyle(glow, 0.45).fillEllipse(foot.x, foot.y, rx * 1.7, ry * 1.7);
-          ring.lineStyle(Math.max(3, rx * 0.18), glow, 1).strokeEllipse(foot.x, foot.y, rx * 2, ry * 2);
-
-          // Upright cutout: show only the player's bbox by cropping the stable
-          // 'cutout' texture, positioned so the crop's bottom-center sits at the feet.
-          if (!this.cutoutImage && this.textures.exists('cutout')) {
-            this.cutoutImage = this.add.image(0, 0, 'cutout').setOrigin(0, 0).setDepth(6);
-          }
-          if (this.cutoutImage) {
-            const targetH = this.screenH * 0.55 * depth; // life-size-ish, shrinks with depth
-            const s = targetH / p.bh;
-            const footY = foot.y + ry * 0.4;
-            const X = foot.x - (p.bx + p.bw / 2) * s;
-            const Y = footY - (p.by + p.bh) * s;
-            this.cutoutImage
-              .setVisible(true)
-              .setCrop(p.bx, p.by, p.bw, p.bh)
-              .setScale(s)
-              .setPosition(X, Y);
-          }
-        }
-
-        updateHud(time, onLava) {
-          const seconds = ((time - this.startTime) / 1000).toFixed(1);
-          const present = !!this.player;
-          this.infoText.setText(`person: ${present ? 'yes' : 'NO'}  |  ${seconds}s`);
-          if (onLava) { this.verdictText.setText('LAVA!'); this.verdictText.setColor('#ff5a2a'); }
-          else { this.verdictText.setText('SAFE'); this.verdictText.setColor('#7CFC7C'); }
-          if (!present) this.statusText.setText('Step into the camera view…');
-          else if (onLava) this.statusText.setText("You're on the LAVA! 🔥");
-          else this.statusText.setText('Nice — stay on the safe tiles!');
+          this.player = { nfx: footX / mw, nfy: maxY / mh, bx: minX, by: minY, bw: maxX - minX + 1, bh: maxY - minY + 1 };
         }
       }
 
-      new Phaser.Game({
-        type: Phaser.AUTO,
-        parent: 'game',
-        backgroundColor: '#0b0d12',
-        scale: {
-          mode: Phaser.Scale.RESIZE,
-          autoCenter: Phaser.Scale.CENTER_BOTH,
-          width: '100%',
-          height: '100%',
-        },
-        scene: [GameScene],
-      });
+      /* ===================== WorldModel / Block / RoundConfig ===================== */
+      function roundConfig(n) {
+        return {
+          n,
+          pickSeconds: Math.max(5, 15 - n * 1.5),
+          unsafeFrac: Math.min(0.7, 0.30 + n * 0.08),
+          rumbleMs: Math.max(1200, 2500 - n * 150),
+          collapseStaggerMs: Math.max(40, 160 - n * 15),
+          shakeAmp: 0.05 + n * 0.012,
+        };
+      }
+      class Block {
+        constructor(r, c) {
+          this.r = r; this.c = c; this.state = 'SOLID'; this.safe = true;
+          this.shakeSeed = Math.random() * 6.28; this.fallT = 0; this.fallDelayMs = 0; this.vy = 0;
+          this.spin = new THREE.Vector3((Math.random()-.5)*4, (Math.random()-.5)*2, (Math.random()-.5)*4);
+          this.mesh = null;
+        }
+      }
+      class WorldModel {
+        constructor() {
+          this.blocks = [];
+          for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) this.blocks.push(new Block(r, c));
+          this.round = 0; this.cfg = roundConfig(0);
+        }
+        at(r, c) { return (r>=0&&r<ROWS&&c>=0&&c<COLS) ? this.blocks[r*COLS+c] : null; }
+        assignRound(n) {
+          this.round = n; this.cfg = roundConfig(n);
+          const total = this.blocks.length;
+          const unsafeN = Math.min(total - 3, Math.round(total * this.cfg.unsafeFrac));
+          const idx = [...this.blocks.keys()];
+          for (let i = idx.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [idx[i], idx[j]] = [idx[j], idx[i]]; }
+          this.blocks.forEach((b) => { b.state = 'SOLID'; b.safe = true; b.fallT = 0; b.vy = 0; });
+          for (let i = 0; i < unsafeN; i++) this.blocks[idx[i]].safe = false;
+        }
+        allUnsafeGone() { return this.blocks.every((b) => b.safe || b.state === 'GONE'); }
+      }
+
+      /* ===================== Procedural assets ===================== */
+      function makeBrickTexture(size = 128) {
+        const c = document.createElement('canvas'); c.width = c.height = size; const g = c.getContext('2d');
+        g.fillStyle = '#2c241f'; g.fillRect(0, 0, size, size);               // mortar
+        const bw = size / 3, bh = size / 4;
+        for (let row = 0; row * bh < size; row++) {
+          const off = (row % 2) ? bw / 2 : 0;
+          for (let x = -bw; x < size; x += bw) {
+            const px = x + off, py = row * bh, base = 86 + ((Math.random() * 38) | 0);
+            g.fillStyle = `rgb(${base},${base-24},${base-40})`;
+            g.fillRect(px + 2, py + 2, bw - 4, bh - 4);
+            g.fillStyle = 'rgba(0,0,0,.18)'; g.fillRect(px + 2, py + bh - 5, bw - 4, 3);   // bottom shade
+            g.fillStyle = 'rgba(255,235,200,.06)'; g.fillRect(px + 2, py + 2, bw - 4, 2);  // top light
+          }
+        }
+        const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
+        t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 2; return t;
+      }
+      function makeLavaMaterial() {
+        return new THREE.ShaderMaterial({
+          uniforms: { uTime: { value: 0 } },
+          vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
+          fragmentShader: `precision mediump float; varying vec2 vUv; uniform float uTime;
+            float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+            float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);
+              return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y);}
+            void main(){ vec2 uv=vUv*5.0; uv.y+=uTime*0.25; uv.x+=sin(uTime*0.3+uv.y)*0.2;
+              float n=noise(uv)*0.6+noise(uv*2.3)*0.4;
+              vec3 hot=vec3(1.0,0.62,0.12), dk=vec3(0.45,0.04,0.0);
+              vec3 col=mix(dk,hot,smoothstep(0.25,0.85,n));
+              col+=hot*pow(smoothstep(0.7,1.0,n),2.0)*0.6;
+              gl_FragColor=vec4(col,1.0);} `,
+        });
+      }
+
+      /* ===================== Billboard (player cutout in 3D) ===================== */
+      class Billboard {
+        constructor(scene, cutoutCanvas) {
+          this.tex = new THREE.CanvasTexture(cutoutCanvas);
+          this.tex.colorSpace = THREE.SRGBColorSpace; this.tex.minFilter = THREE.LinearFilter;
+          this.tex.magFilter = THREE.LinearFilter; this.tex.generateMipmaps = false;
+          this.mat = new THREE.MeshBasicMaterial({ map: this.tex, transparent: true, depthWrite: false, alphaTest: 0.05, side: THREE.DoubleSide });
+          this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.mat);
+          this.mesh.visible = false; scene.add(this.mesh);
+          // ring under feet
+          const rg = new THREE.RingGeometry(0.32, 0.46, 28);
+          this.ringMat = new THREE.MeshBasicMaterial({ color: 0x49d98a, transparent: true, opacity: 0.85, side: THREE.DoubleSide });
+          this.ring = new THREE.Mesh(rg, this.ringMat); this.ring.rotation.x = -Math.PI / 2; this.ring.visible = false;
+          scene.add(this.ring);
+        }
+        update(player, mw, mh, world3, camera, onLava, out) {
+          if (!player || !world3) { this.mesh.visible = false; this.ring.visible = false; return; }
+          this.tex.needsUpdate = true;
+          // crop the cutout texture to the player's bbox (flipY: canvas top -> texture v)
+          this.tex.offset.set(player.bx / mw, 1 - (player.by + player.bh) / mh);
+          this.tex.repeat.set(player.bw / mw, player.bh / mh);
+          const aspect = player.bw / player.bh;
+          const h = 2.6, w = h * aspect;                     // life-size-ish in world units
+          this.mesh.scale.set(w, h, 1);
+          this.mesh.position.set(world3.x, BLOCK_H + h / 2, world3.z);
+          // yaw-billboard: stay upright, turn to face the camera horizontally
+          this.mesh.rotation.set(0, Math.atan2(camera.position.x - world3.x, camera.position.z - world3.z), 0);
+          this.mat.opacity = out ? 0.35 : 1.0;
+          this.mat.color.setHex(out ? 0xff7a55 : 0xffffff);
+          this.mesh.visible = true;
+          this.ring.position.set(world3.x, BLOCK_H + 0.02, world3.z);
+          this.ringMat.color.setHex(out ? 0xff5a2a : (onLava ? 0xff6a2a : 0x49d98a));
+          this.ring.visible = true;
+        }
+      }
+
+      /* ===================== StageRenderer (Three.js, mirror/virtual stage) ===================== */
+      class StageRenderer {
+        constructor(canvas, cutoutCanvas) {
+          this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, powerPreference: 'high-performance' });
+          this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+          this.scene = new THREE.Scene();
+          this.scene.background = new THREE.Color(0x0a0608);
+          this.scene.fog = new THREE.Fog(0x0a0608, 8, 28);
+
+          this.camera = new THREE.PerspectiveCamera(46, 1, 0.1, 100);
+          this.camBase = new THREE.Vector3(0, 9.0, ROWS + 5.0);
+          this.camLook = new THREE.Vector3(0, 0, ROWS * 0.5);
+          this.camera.position.copy(this.camBase); this.camera.lookAt(this.camLook);
+
+          this.scene.add(new THREE.HemisphereLight(0x8899bb, 0x301808, 0.7));
+          this.scene.add(new THREE.AmbientLight(0x40384a, 0.5));
+          const dir = new THREE.DirectionalLight(0xffd9a0, 0.8); dir.position.set(4, 12, 8); this.scene.add(dir);
+          this.lavaLight = new THREE.PointLight(0xff6620, 0.9, 30); this.lavaLight.position.set(0, -0.5, ROWS * 0.5); this.scene.add(this.lavaLight);
+
+          // Lava plane (below blocks)
+          this.lavaMat = makeLavaMaterial();
+          const lava = new THREE.Mesh(new THREE.PlaneGeometry(COLS + 8, ROWS + 8), this.lavaMat);
+          lava.rotation.x = -Math.PI / 2; lava.position.set(0, -0.02, ROWS / 2); this.scene.add(lava);
+
+          // Blocks (shared material)
+          this.brickMat = new THREE.MeshStandardMaterial({ map: makeBrickTexture(), roughness: 0.95, metalness: 0.0 });
+          this.blockGeo = new THREE.BoxGeometry(BLOCK * 0.96, BLOCK_H, BLOCK * 0.96);
+
+          // Back wall for dungeon ambiance
+          const wallMat = new THREE.MeshStandardMaterial({ map: makeBrickTexture(), roughness: 1.0 });
+          wallMat.map.repeat.set(COLS, 3);
+          const wall = new THREE.Mesh(new THREE.PlaneGeometry(COLS + 6, 6), wallMat);
+          wall.position.set(0, 2.2, -0.6); this.scene.add(wall);
+
+          this.cutoutCanvas = cutoutCanvas;
+          this.billboard = new Billboard(this.scene, cutoutCanvas);
+
+          this.shakeT = 0; this.rumbleAmp = 0;
+          window.addEventListener('resize', () => this.resize());
+          canvas.addEventListener('webglcontextlost', (e) => e.preventDefault(), false);
+          this.resize();
+        }
+        buildBlocks(world) {
+          world.blocks.forEach((b) => {
+            if (!b.mesh) { b.mesh = new THREE.Mesh(this.blockGeo, this.brickMat); this.scene.add(b.mesh); }
+            b.mesh.position.set(b.c + 0.5 - COLS / 2, BLOCK_H / 2, b.r + 0.5);
+            b.mesh.rotation.set(0, 0, 0); b.mesh.visible = true;
+            b.base = b.mesh.position.clone();
+          });
+        }
+        // (u,v) grid -> world XZ on top of the floor
+        gridToWorld(u, v) { return { x: (u - 0.5) * COLS, z: v * ROWS }; }
+        resize() {
+          const w = window.innerWidth, h = window.innerHeight;
+          this.renderer.setSize(w, h, false); this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
+        }
+        syncBlocks(world, dt, now) {
+          for (const b of world.blocks) {
+            if (!b.mesh) continue;
+            const m = b.mesh;
+            if (b.state === 'SOLID') {
+              if (this.rumbleAmp > 0) {
+                const a = this.rumbleAmp;
+                m.position.set(b.base.x + Math.sin(now*0.02 + b.shakeSeed)*a*0.5, b.base.y, b.base.z + Math.cos(now*0.023 + b.shakeSeed)*a*0.5);
+              } else m.position.copy(b.base);
+            } else if (b.state === 'SHAKING') {
+              const a = world.cfg.shakeAmp * 2.2;
+              m.position.set(b.base.x + (Math.random()-.5)*a, b.base.y + (Math.random()-.5)*a*0.4, b.base.z + (Math.random()-.5)*a);
+              m.rotation.set((Math.random()-.5)*0.08, 0, (Math.random()-.5)*0.08);
+            } else if (b.state === 'FALLING') {
+              b.vy -= 22 * dt; m.position.y += b.vy * dt;
+              m.position.x = b.base.x + b.spin.x * 0.02; m.position.z = b.base.z + b.spin.z * 0.02;
+              m.rotation.x += b.spin.x * dt; m.rotation.z += b.spin.z * dt; m.rotation.y += b.spin.y * dt;
+              if (m.position.y < -3) { b.state = 'GONE'; m.visible = false; }
+            } else if (b.state === 'GONE') { m.visible = false; }
+          }
+        }
+        syncPlayer(player, mw, mh, uv, onLava, out) {
+          const world3 = (player && uv) ? this.gridToWorld(uv.u, uv.v) : null;
+          this.billboard.update(player, mw, mh, world3, this.camera, onLava, out);
+        }
+        render(now) {
+          this.lavaMat.uniforms.uTime.value = now * 0.001;
+          this.lavaLight.intensity = 0.7 + Math.sin(now * 0.006) * 0.2;
+          // camera rumble
+          if (this.rumbleAmp > 0) {
+            this.camera.position.set(this.camBase.x + (Math.random()-.5)*this.rumbleAmp, this.camBase.y + (Math.random()-.5)*this.rumbleAmp, this.camBase.z);
+          } else this.camera.position.copy(this.camBase);
+          this.camera.lookAt(this.camLook);
+          this.renderer.render(this.scene, this.camera);
+        }
+      }
+
+      /* ===================== HUD ===================== */
+      class Hud {
+        constructor() {
+          this.el = $('hud'); this.round = $('roundPill'); this.timer = $('timer');
+          this.score = $('scorePill'); this.banner = $('banner'); this.verdict = $('verdict'); this.fps = $('fps');
+        }
+        show(v) { this.el.classList.toggle('show', v); }
+        setBanner(text) { this.banner.textContent = text; this.banner.style.opacity = text ? 1 : 0; }
+        update(state, timeLeft, world, present, onLava, out, score, fps) {
+          this.round.textContent = 'Round ' + (world.round + 1);
+          this.score.textContent = 'Score ' + score;
+          this.timer.textContent = (state === 'PICK') ? Math.ceil(timeLeft) : '';
+          if (!present) { this.verdict.textContent = ''; }
+          else if (out) { this.verdict.textContent = 'OUT'; this.verdict.style.color = '#ff5a2a'; }
+          else if (onLava) { this.verdict.textContent = 'LAVA!'; this.verdict.style.color = '#ff6a2a'; }
+          else { this.verdict.textContent = 'SAFE'; this.verdict.style.color = '#7CFC7C'; }
+          if (DEBUG) this.fps.textContent = fps.toFixed(0) + ' fps';
+        }
+      }
+
+      /* ===================== CalibrationScreen ===================== */
+      class CalibrationScreen {
+        constructor(tracker) {
+          this.tracker = tracker;
+          this.canvas = $('calibCanvas'); this.ctx = this.canvas.getContext('2d');
+          this.ui = $('calibUi'); this.label = $('cornerLabel');
+          this.corners = []; this.dragIdx = -1; this.onDone = null;
+          this.canvas.addEventListener('pointerdown', (e) => this.onDown(e));
+          this.canvas.addEventListener('pointermove', (e) => this.onMove(e));
+          this.canvas.addEventListener('pointerup', () => { this.dragIdx = -1; });
+          $('calibRedo').addEventListener('click', () => { this.corners = []; this.refreshLabel(); });
+          $('calibConfirm').addEventListener('click', () => this.confirm());
+          this.saved = this.loadSaved();
+        }
+        loadSaved() { try { return JSON.parse(localStorage.getItem('floorCorners') || 'null'); } catch { return null; } }
+        start(onDone) {
+          this.onDone = onDone; this.corners = [];
+          this.canvas.style.display = 'block'; this.ui.classList.add('show'); this.refreshLabel();
+          if (this.saved) { /* could offer reuse; auto-not for now */ }
+        }
+        stop() { this.canvas.style.display = 'none'; this.ui.classList.remove('show'); }
+        refreshLabel() { this.label.textContent = this.corners.length < 4 ? CORNER_LABELS[this.corners.length] : 'Confirm or Redo'; }
+        norm(e) {
+          const r = this.canvas.getBoundingClientRect();
+          return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+        }
+        onDown(e) {
+          const p = this.norm(e);
+          // grab nearest existing corner to nudge, else add
+          let near = -1, best = 0.0025;
+          this.corners.forEach((c, i) => { const d = (c.x-p.x)**2 + (c.y-p.y)**2; if (d < best) { best = d; near = i; } });
+          if (near >= 0) { this.dragIdx = near; this.corners[near] = p; }
+          else if (this.corners.length < 4) { this.corners.push(p); }
+          this.refreshLabel();
+        }
+        onMove(e) { if (this.dragIdx >= 0) this.corners[this.dragIdx] = this.norm(e); }
+        confirm() {
+          if (this.corners.length < 4) return;
+          const fm = new FloorMapping(this.corners.slice());
+          if (!fm.valid()) { this.label.textContent = 'Bad shape — Redo'; return; }
+          try { localStorage.setItem('floorCorners', JSON.stringify(this.corners)); } catch {}
+          this.stop(); this.onDone(fm);
+        }
+        draw() {
+          const v = this.tracker.video; if (!v.videoWidth) return;
+          const cw = this.canvas.clientWidth, ch = this.canvas.clientHeight;
+          if (this.canvas.width !== cw || this.canvas.height !== ch) { this.canvas.width = cw; this.canvas.height = ch; }
+          const g = this.ctx;
+          g.save(); g.setTransform(-1, 0, 0, 1, cw, 0); g.drawImage(v, 0, 0, cw, ch); g.restore();
+          // overlay quad + dots
+          g.lineWidth = 3; g.strokeStyle = '#ffd27a'; g.fillStyle = '#ffd27a';
+          if (this.corners.length) {
+            g.beginPath();
+            this.corners.forEach((c, i) => { const x = c.x * cw, y = c.y * ch; i ? g.lineTo(x, y) : g.moveTo(x, y); });
+            if (this.corners.length === 4) g.closePath();
+            g.stroke();
+            this.corners.forEach((c, i) => { g.beginPath(); g.arc(c.x*cw, c.y*ch, 10, 0, 7); g.fill();
+              g.fillStyle = '#1a0d05'; g.font = 'bold 12px system-ui'; g.fillText(i+1, c.x*cw-3, c.y*ch+4); g.fillStyle = '#ffd27a'; });
+          }
+        }
+      }
+
+      /* ===================== GameStateMachine + App ===================== */
+      const S = { BOOT:'BOOT', CALIBRATING:'CALIBRATING', MODE_SELECT:'MODE_SELECT',
+        ROUND_INTRO:'ROUND_INTRO', PICK:'PICK', RUMBLE:'RUMBLE', COLLAPSE:'COLLAPSE', RESOLVE:'RESOLVE', GAME_OVER:'GAME_OVER' };
+
+      class App {
+        constructor() {
+          this.tracker = new BodyTracker($('webcam'));
+          this.cutout = new CutoutBuilder();
+          this.world = new WorldModel();
+          this.hud = new Hud();
+          this.calib = new CalibrationScreen(this.tracker);
+          this.renderer = null;
+          this.floor = null;                 // FloorMapping
+          this.state = S.BOOT; this.tEnter = performance.now();
+          this.score = 0; this.outLatch = false; this.outFrames = 0;
+          this.uv = null; this.cell = null; this.onLava = false; this.collapseStartedAt = 0;
+          this._last = performance.now(); this._fps = 0;
+          this.wireUi();
+        }
+        wireUi() {
+          $('startBtn').addEventListener('click', () => this.onStart());
+          $('modeLava').addEventListener('click', () => this.beginGame());
+          $('goReplay').addEventListener('click', () => { this.score = 0; this.startRound(0); });
+          $('goRecalib').addEventListener('click', () => { $('gameover').classList.remove('show'); this.toCalibrate(); });
+        }
+        screen(id, show) { const el = $(id); if (el) el.classList.toggle('show', show); }
+        setState(s) { this.state = s; this.tEnter = performance.now(); }
+        sinceEnter() { return performance.now() - this.tEnter; }
+
+        async onStart() {
+          $('startBtn').textContent = 'Loading…';
+          try { await this.tracker.init(); }
+          catch (e) { $('boot').innerHTML = '<h1>Camera error</h1><p>Allow camera access; use an https:// link on iPhone or Chrome on desktop.</p><small>'+(e.message||e)+'</small>'; return; }
+          this.screen('boot', false);
+          // Build the Three stage now that we have a cutout canvas
+          this.renderer = new StageRenderer($('stage'), this.cutout.canvas);
+          this.renderer.buildBlocks(this.world);
+          this.toCalibrate();
+          requestAnimationFrame((t) => this.loop(t));
+        }
+        toCalibrate() {
+          $('stage').style.display = 'none';
+          this.setState(S.CALIBRATING);
+          this.calib.start((fm) => { this.floor = fm; this.afterCalib(); });
+        }
+        afterCalib() {
+          $('stage').style.display = 'block';
+          this.setState(S.MODE_SELECT); this.screen('modeselect', true);
+        }
+        beginGame() { this.screen('modeselect', false); this.hud.show(true); this.score = 0; this.startRound(0); }
+        startRound(n) {
+          this.screen('gameover', false); this.hud.show(true);
+          this.world.assignRound(n); this.renderer.buildBlocks(this.world);
+          this.renderer.rumbleAmp = 0; this.outLatch = false; this.outFrames = 0;
+          this.setState(S.ROUND_INTRO); this.hud.setBanner('ROUND ' + (n + 1));
+        }
+
+        // ---- per-frame ----
+        loop(now) {
+          requestAnimationFrame((t) => this.loop(t));
+          const dt = Math.min(0.05, (now - this._last) / 1000); this._last = now;
+          this._fps = this._fps * 0.9 + (1 / Math.max(dt, 1e-3)) * 0.1;
+
+          this.tracker.detect(performance.now());
+          if (this.state !== S.BOOT) this.cutout.update(this.tracker);
+
+          if (this.state === S.CALIBRATING) { this.calib.draw(); return; }
+
+          // map foot -> grid cell
+          this.uv = null; this.cell = null; const p = this.cutout.player;
+          if (p && this.floor) {
+            const g = this.floor.mapFootToGrid(p.nfx, p.nfy);
+            this.uv = g;
+            const c = Math.floor(g.u * COLS), r = Math.floor(g.v * ROWS);
+            if (r >= 0 && r < ROWS && c >= 0 && c < COLS) this.cell = { r, c };
+          }
+          const block = this.cell ? this.world.at(this.cell.r, this.cell.c) : null;
+          this.onLava = !!(block && (block.state === 'GONE' || block.state === 'FALLING'));
+
+          this.fsmUpdate(now, dt);
+
+          // OUT detection with hysteresis (only once collapse is committed)
+          let out = this.outLatch;
+          if ((this.state === S.COLLAPSE || this.state === S.RESOLVE) && block && !block.safe) {
+            this.outFrames = this.onLava ? this.outFrames + 1 : Math.max(0, this.outFrames - 1);
+            if (this.outFrames > 6 && !this.outLatch) { this.outLatch = true; out = true; }
+          }
+
+          if (this.renderer) {
+            this.renderer.syncBlocks(this.world, dt, now);
+            this.renderer.syncPlayer(p, this.cutout.mw, this.cutout.mh, this.uv, this.onLava, out);
+            this.renderer.render(now);
+          }
+          this.hud.update(this.state, this.timeLeft(), this.world, !!p, this.onLava, out, this.score, this._fps);
+          if (DEBUG && this.cell) this.hud.fps.textContent = `${this._fps.toFixed(0)}fps  u${this.uv.u.toFixed(2)} v${this.uv.v.toFixed(2)}  r${this.cell.r}c${this.cell.c}`;
+        }
+        timeLeft() {
+          if (this.state === S.PICK) return Math.max(0, this.world.cfg.pickSeconds - this.sinceEnter() / 1000);
+          return 0;
+        }
+        fsmUpdate(now, dt) {
+          const t = this.sinceEnter();
+          switch (this.state) {
+            case S.ROUND_INTRO:
+              if (t > 1600) { this.hud.setBanner(''); this.setState(S.PICK); }
+              break;
+            case S.PICK:
+              if (t / 1000 >= this.world.cfg.pickSeconds) { this.setState(S.RUMBLE); this.renderer.rumbleAmp = 0.12; this.hud.setBanner('RUMBLE…'); }
+              break;
+            case S.RUMBLE:
+              this.renderer.rumbleAmp = 0.10 + Math.sin(now * 0.02) * 0.04;
+              if (t > this.world.cfg.rumbleMs) {
+                this.renderer.rumbleAmp = 0; this.hud.setBanner('COLLAPSE!');
+                // commit unsafe blocks to shake then fall (staggered)
+                let k = 0;
+                for (const b of this.world.blocks) if (!b.safe) { b.state = 'SHAKING'; b.fallDelayMs = 600 + (k++) * this.world.cfg.collapseStaggerMs; }
+                this.collapseStartedAt = now; this.setState(S.COLLAPSE);
+              }
+              break;
+            case S.COLLAPSE: {
+              const el = now - this.collapseStartedAt;
+              for (const b of this.world.blocks) if (b.state === 'SHAKING' && el > b.fallDelayMs) b.state = 'FALLING';
+              if (this.world.allUnsafeGone()) { this.hud.setBanner(''); this.setState(S.RESOLVE); }
+              break;
+            }
+            case S.RESOLVE:
+              if (t > 1500) {
+                const survived = !this.outLatch;
+                if (survived) this.score += (this.world.round + 1) * 10;
+                if (survived && this.world.round < 9) { this.startRound(this.world.round + 1); }
+                else { this.endGame(survived); }
+              }
+              break;
+          }
+        }
+        endGame(survived) {
+          this.setState(S.GAME_OVER); this.hud.show(false);
+          $('goTitle').textContent = survived ? 'You cleared every round! 🏆' : 'You fell in the lava! 🔥';
+          $('goSub').textContent = `Reached round ${this.world.round + 1} · Score ${this.score}`;
+          this.screen('gameover', true);
+        }
+      }
+
+      new App();
     </script>
   </body>
 </html>
