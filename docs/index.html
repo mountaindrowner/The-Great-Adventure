@@ -7,13 +7,11 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <title>Floor Is Lava — Ancient Dungeon</title>
     <!--
-      SINGLE-FILE 3D version. Works on iPhone (Safari) and desktop (Chrome).
-      Open from an https:// link (iOS won't give the camera to a downloaded file).
-      Flow: Start -> Calibrate (tap 4 floor corners) -> pick mode -> play rounds.
+      SINGLE-FILE 3D version. iPhone (Safari) + desktop (Chrome). Open from https://.
+      Flow: Title menu -> Play -> Calibrate (tap 4 floor corners, flip camera if needed)
+      -> pick mode -> play rounds. Settings: camera front/back, grid size, difficulty.
       Libraries (Three.js + MediaPipe) load from CDN; needs internet on first load.
-
-      Code is sectioned with /* ==== Name ==== */ banners that mirror the src/
-      module files of the same name, to keep the two copies conceptually in sync.
+      Sections mirror the src/ module files of the same name.
     -->
     <style>
       html, body {
@@ -29,60 +27,65 @@
 
       .screen {
         position: fixed; inset: 0; z-index: 10; display: none;
-        flex-direction: column; align-items: center; justify-content: center;
-        text-align: center; padding: 28px calc(24px + env(safe-area-inset-right)) 28px calc(24px + env(safe-area-inset-left));
-        background: radial-gradient(circle at 50% 32%, rgba(40,22,12,0.92), rgba(7,6,10,0.96) 72%);
+        flex-direction: column; align-items: center; justify-content: center; text-align: center;
+        padding: 28px calc(24px + env(safe-area-inset-right)) 28px calc(24px + env(safe-area-inset-left));
+        background: radial-gradient(circle at 50% 30%, rgba(44,24,12,0.94), rgba(7,6,10,0.97) 72%);
       }
       .screen.show { display: flex; }
-      h1 { font-size: 30px; margin: 0 0 6px; font-weight: 800; letter-spacing: .5px; }
-      p  { font-size: 17px; line-height: 1.5; color: #d6cdbf; max-width: 32ch; margin: 6px 0; }
+      h1 { font-size: 32px; margin: 0 0 4px; font-weight: 900; letter-spacing: .5px; }
+      .sub { font-size: 16px; color: #c9b79a; margin: 0 0 8px; }
+      p  { font-size: 16px; line-height: 1.5; color: #d6cdbf; max-width: 34ch; margin: 6px 0; }
+      .howlist { text-align: left; max-width: 32ch; margin: 4px auto; }
+      .howlist li { margin: 8px 0; font-size: 16px; line-height: 1.4; }
       .btn {
-        margin-top: 18px; padding: 16px 38px; font-size: 21px; font-weight: 700;
+        margin-top: 14px; padding: 15px 34px; font-size: 20px; font-weight: 700;
         color: #1a0d05; background: #ffb347; border: none; border-radius: 14px;
-        box-shadow: 0 6px 0 #b76f1c; cursor: pointer; touch-action: manipulation;
+        box-shadow: 0 6px 0 #b76f1c; cursor: pointer; touch-action: manipulation; min-width: 200px;
       }
       .btn:active { transform: translateY(3px); box-shadow: 0 3px 0 #b76f1c; }
-      .btn.green { background: #6fdc8c; box-shadow: 0 6px 0 #2f9b52; }
+      .btn.green { background: #6fdc8c; box-shadow: 0 6px 0 #2f9b52; color: #07210f; }
       .btn.green:active { box-shadow: 0 3px 0 #2f9b52; }
       .btn.ghost { background: #2a2630; color: #e9e4dc; box-shadow: 0 6px 0 #15131a; }
+      .btn.ghost:active { box-shadow: 0 3px 0 #15131a; }
+      .btn.sm { padding: 11px 20px; font-size: 16px; min-width: 0; margin-top: 0; }
       .row { display: flex; gap: 12px; flex-wrap: wrap; justify-content: center; }
-      small { display: block; margin-top: 16px; color: #8a8170; font-size: 13px; max-width: 34ch; }
+      small { display: block; margin-top: 14px; color: #8a8170; font-size: 13px; max-width: 34ch; }
+
+      /* Settings segmented controls */
+      .setrow { display: flex; align-items: center; gap: 12px; margin: 10px 0; }
+      .setlabel { width: 92px; text-align: right; color: #c9b79a; font-size: 15px; }
+      .seg { display: inline-flex; background: #1c1922; border-radius: 12px; overflow: hidden; }
+      .seg-btn { padding: 10px 16px; font-size: 15px; font-weight: 600; color: #b9b0a2;
+        background: transparent; border: none; cursor: pointer; touch-action: manipulation; }
+      .seg-btn.active { background: #ffb347; color: #1a0d05; }
 
       /* Calibration overlay UI */
       #calibUi { position: fixed; inset: 0; z-index: 3; display: none; pointer-events: none; }
       #calibUi.show { display: block; }
       #calibHint {
         position: absolute; top: calc(14px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
-        background: rgba(0,0,0,.6); padding: 10px 16px; border-radius: 10px; font-size: 16px;
-        text-align: center; max-width: 90vw;
+        background: rgba(0,0,0,.62); padding: 10px 16px; border-radius: 10px; font-size: 16px; text-align: center; max-width: 92vw;
       }
       #calibHint b { color: #ffd27a; }
       #calibBtns {
         position: absolute; bottom: calc(20px + env(safe-area-inset-bottom)); left: 50%; transform: translateX(-50%);
-        display: flex; gap: 12px; pointer-events: auto;
+        display: flex; gap: 10px; pointer-events: auto; flex-wrap: wrap; justify-content: center;
       }
-      #calibBtns .btn { margin-top: 0; padding: 12px 24px; font-size: 17px; }
 
-      /* In-game HUD (DOM overlay over the Three canvas) */
+      /* In-game HUD */
       #hud { position: fixed; inset: 0; z-index: 5; display: none; pointer-events: none; }
       #hud.show { display: block; }
-      #hudTop {
-        position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 0; right: 0;
-        display: flex; justify-content: space-between; align-items: flex-start;
-        padding: 0 16px;
-      }
+      #hudTop { position: absolute; top: calc(12px + env(safe-area-inset-top)); left: 0; right: 0;
+        display: flex; justify-content: space-between; align-items: flex-start; padding: 0 16px; }
       .pill { background: rgba(0,0,0,.55); padding: 8px 14px; border-radius: 12px; font-size: 16px; font-weight: 600; }
       #timer { font-size: 30px; font-weight: 800; }
-      #banner {
-        position: absolute; top: 38%; left: 50%; transform: translate(-50%,-50%);
+      #banner { position: absolute; top: 38%; left: 50%; transform: translate(-50%,-50%);
         font-size: 44px; font-weight: 900; letter-spacing: 1px; text-align: center;
-        text-shadow: 0 3px 12px rgba(0,0,0,.8); opacity: 0; transition: opacity .25s; padding: 0 16px;
-      }
-      #verdict {
-        position: absolute; left: 16px; bottom: calc(18px + env(safe-area-inset-bottom));
-        font-size: 40px; font-weight: 900; text-shadow: 0 2px 8px rgba(0,0,0,.8);
-      }
+        text-shadow: 0 3px 12px rgba(0,0,0,.8); opacity: 0; transition: opacity .25s; padding: 0 16px; }
+      #verdict { position: absolute; left: 16px; bottom: calc(18px + env(safe-area-inset-bottom));
+        font-size: 40px; font-weight: 900; text-shadow: 0 2px 8px rgba(0,0,0,.8); }
       #fps { position: absolute; right: 16px; bottom: calc(18px + env(safe-area-inset-bottom)); font-size: 12px; color: #7d7466; }
+      .spin { font-size: 18px; color: #d6cdbf; }
     </style>
   </head>
   <body>
@@ -90,30 +93,72 @@
     <canvas id="calibCanvas"></canvas>
     <video id="webcam" autoplay playsinline muted></video>
 
-    <!-- Boot / Start -->
-    <div id="boot" class="screen show">
-      <h1>🌋 Floor Is Lava</h1>
-      <p>Ancient-dungeon survival. Prop your phone up high, angled down at your play area so it sees your whole body.</p>
-      <button id="startBtn" class="btn">Start</button>
-      <small>Tap Start, then allow camera access. Needs internet on first load.</small>
+    <!-- Title / main menu -->
+    <div id="title" class="screen show">
+      <h1>🌋 FLOOR IS LAVA</h1>
+      <div class="sub">Ancient Dungeon · webcam survival</div>
+      <button id="btnPlay" class="btn green">Play</button>
+      <button id="btnHow" class="btn ghost">How to play</button>
+      <button id="btnSettings" class="btn ghost">Settings</button>
+      <small>Prop your phone up so the camera sees your whole play area.</small>
     </div>
 
-    <!-- Calibration overlay UI (drawn over #calibCanvas live camera) -->
+    <!-- How to play -->
+    <div id="howto" class="screen">
+      <h1>How to play</h1>
+      <ul class="howlist">
+        <li>📷 Prop the phone up, angled at your floor. Use the <b>back camera</b> if you can.</li>
+        <li>🟧 <b>Calibrate:</b> tap the 4 corners of your real play area so the game knows your floor.</li>
+        <li>🧍 You appear inside a dungeon, standing on brick tiles.</li>
+        <li>⏱️ Each round you get a few seconds to <b>pick a tile</b>.</li>
+        <li>💥 Then the stage rumbles and the <b>unsafe tiles crumble into the lava</b>.</li>
+        <li>✅ Land on solid stone to survive. Last as long as you can!</li>
+      </ul>
+      <button class="btn green backTitle">Got it</button>
+    </div>
+
+    <!-- Settings -->
+    <div id="settings" class="screen">
+      <h1>Settings</h1>
+      <div class="setrow"><div class="setlabel">Camera</div>
+        <div class="seg" data-key="facing">
+          <button class="seg-btn" data-val="user">Front</button>
+          <button class="seg-btn" data-val="environment">Back</button>
+        </div></div>
+      <div class="setrow"><div class="setlabel">Grid</div>
+        <div class="seg" data-key="grid">
+          <button class="seg-btn" data-val="5">5×5</button>
+          <button class="seg-btn" data-val="6">6×6</button>
+          <button class="seg-btn" data-val="7">7×7</button>
+        </div></div>
+      <div class="setrow"><div class="setlabel">Difficulty</div>
+        <div class="seg" data-key="difficulty">
+          <button class="seg-btn" data-val="chill">Chill</button>
+          <button class="seg-btn" data-val="normal">Normal</button>
+          <button class="seg-btn" data-val="hard">Hard</button>
+        </div></div>
+      <button class="btn green backTitle">Done</button>
+      <small>Back camera is best when the phone is propped up watching your play space.</small>
+    </div>
+
+    <!-- Loading -->
+    <div id="loading" class="screen"><div class="spin">Loading camera + model…</div></div>
+
+    <!-- Calibration UI -->
     <div id="calibUi">
       <div id="calibHint">Tap the <b>4 corners</b> of your play floor:<br><b id="cornerLabel">FAR-LEFT</b></div>
       <div id="calibBtns">
-        <button id="calibRedo" class="btn ghost">Redo</button>
-        <button id="calibConfirm" class="btn green">Confirm</button>
+        <button id="calibFlip" class="btn ghost sm">🔄 Flip camera</button>
+        <button id="calibRedo" class="btn ghost sm">Redo</button>
+        <button id="calibConfirm" class="btn green sm">Confirm</button>
       </div>
     </div>
 
     <!-- Mode select -->
     <div id="modeselect" class="screen">
       <h1>Choose a mode</h1>
-      <div class="row">
-        <button id="modeLava" class="btn">🌋 Floor Is Lava</button>
-      </div>
-      <small>More modes later. For now, survive the collapsing dungeon.</small>
+      <div class="row"><button id="modeLava" class="btn">🌋 Floor Is Lava</button></div>
+      <small>More modes later.</small>
     </div>
 
     <!-- Game over -->
@@ -123,6 +168,7 @@
       <div class="row">
         <button id="goReplay" class="btn green">Play again</button>
         <button id="goRecalib" class="btn ghost">Recalibrate</button>
+        <button id="goMenu" class="btn ghost">Menu</button>
       </div>
     </div>
 
@@ -145,39 +191,47 @@
       const DEBUG = new URLSearchParams(location.search).has('debug');
       const $ = (id) => document.getElementById(id);
 
-      /* ===================== Constants ===================== */
-      const COLS = 6, ROWS = 6;            // grid: columns (lateral) x rows (depth)
-      const BLOCK = 1.0;                   // block footprint (world units)
-      const BLOCK_H = 0.6;                 // block height
-      const MIN_PERSON_PIXELS = 60;
-      const UNIT_QUAD = [ {x:0,y:0}, {x:1,y:0}, {x:1,y:1}, {x:0,y:1} ]; // FL, FR, NR, NL
+      /* ===================== Settings + dynamic grid ===================== */
+      const SETTINGS = Object.assign(
+        { facing: 'user', grid: 6, difficulty: 'normal' },
+        (() => { try { return JSON.parse(localStorage.getItem('flSettings') || '{}'); } catch { return {}; } })()
+      );
+      const saveSettings = () => { try { localStorage.setItem('flSettings', JSON.stringify(SETTINGS)); } catch {} };
+      let COLS = SETTINGS.grid, ROWS = SETTINGS.grid;     // mutable: applied at Play
+      const BLOCK = 1.0, BLOCK_H = 0.6, MIN_PERSON_PIXELS = 60;
+      const UNIT_QUAD = [ {x:0,y:0}, {x:1,y:0}, {x:1,y:1}, {x:0,y:1} ];
       const CORNER_LABELS = ['FAR-LEFT','FAR-RIGHT','NEAR-RIGHT','NEAR-LEFT'];
+      const DIFF = { chill: 1.3, normal: 1.0, hard: 0.72 };
 
-      /* ===================== BodyTracker (reused) ===================== */
+      /* ===================== BodyTracker (camera flip + mirror) ===================== */
       class BodyTracker {
         constructor(videoEl) {
           this.video = videoEl; this.segmenter = null; this.ready = false;
           this.mask = null; this.maskWidth = 0; this.maskHeight = 0; this._lastVideoTime = -1;
+          this.facing = 'user'; this.mirrored = true;
         }
-        async init() {
+        async _openCamera(facing) {
+          if (this.video.srcObject) this.video.srcObject.getTracks().forEach((t) => t.stop());
           const stream = await navigator.mediaDevices.getUserMedia({
-            video: { width: { ideal: 960 }, height: { ideal: 720 }, facingMode: 'user' }, audio: false,
-          });
+            video: { width: { ideal: 960 }, height: { ideal: 720 }, facingMode: facing }, audio: false });
           this.video.srcObject = stream; this.video.setAttribute('playsinline', '');
           await this.video.play();
           if (!this.video.videoWidth) await new Promise((r) => (this.video.onloadeddata = () => r()));
+          this.facing = facing; this.mirrored = (facing === 'user'); this._lastVideoTime = -1;
+        }
+        async init(facing) {
+          await this._openCamera(facing || 'user');
           const fileset = await FilesetResolver.forVisionTasks(
             'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm');
           const modelAssetPath =
             'https://storage.googleapis.com/mediapipe-models/image_segmenter/selfie_multiclass_256x256/float32/latest/selfie_multiclass_256x256.tflite';
-          const opts = (delegate) => ({
-            baseOptions: { modelAssetPath, delegate },
-            runningMode: 'VIDEO', outputCategoryMask: true, outputConfidenceMasks: false,
-          });
+          const opts = (d) => ({ baseOptions: { modelAssetPath, delegate: d },
+            runningMode: 'VIDEO', outputCategoryMask: true, outputConfidenceMasks: false });
           try { this.segmenter = await ImageSegmenter.createFromOptions(fileset, opts('GPU')); }
           catch (e) { this.segmenter = await ImageSegmenter.createFromOptions(fileset, opts('CPU')); }
           this.ready = true;
         }
+        async setFacing(facing) { await this._openCamera(facing); }
         detect(ts) {
           if (!this.ready || this.video.currentTime === this._lastVideoTime) return;
           this._lastVideoTime = this.video.currentTime;
@@ -190,15 +244,12 @@
       }
       const isPerson = (v) => v !== 0;
 
-      /* ===================== Homography (plain JS) ===================== */
+      /* ===================== Homography ===================== */
       function solve8x8(A, b) {
         const n = 8, M = A.map((r, i) => [...r, b[i]]);
         for (let col = 0; col < n; col++) {
-          let p = col;
-          for (let r = col + 1; r < n; r++) if (Math.abs(M[r][col]) > Math.abs(M[p][col])) p = r;
-          [M[col], M[p]] = [M[p], M[col]];
-          const pv = M[col][col];
-          if (Math.abs(pv) < 1e-12) return null;            // singular -> degenerate quad
+          let p = col; for (let r = col + 1; r < n; r++) if (Math.abs(M[r][col]) > Math.abs(M[p][col])) p = r;
+          [M[col], M[p]] = [M[p], M[col]]; const pv = M[col][col]; if (Math.abs(pv) < 1e-12) return null;
           for (let c = col; c <= n; c++) M[col][c] /= pv;
           for (let r = 0; r < n; r++) { if (r === col) continue; const f = M[r][col];
             for (let c = col; c <= n; c++) M[r][c] -= f * M[col][c]; }
@@ -207,67 +258,45 @@
       }
       function computeHomography(src, dst) {
         const A = [], b = [];
-        for (let i = 0; i < 4; i++) {
-          const X = src[i].x, Y = src[i].y, u = dst[i].x, v = dst[i].y;
+        for (let i = 0; i < 4; i++) { const X = src[i].x, Y = src[i].y, u = dst[i].x, v = dst[i].y;
           A.push([X, Y, 1, 0, 0, 0, -u * X, -u * Y]); b.push(u);
-          A.push([0, 0, 0, X, Y, 1, -v * X, -v * Y]); b.push(v);
-        }
+          A.push([0, 0, 0, X, Y, 1, -v * X, -v * Y]); b.push(v); }
         const h = solve8x8(A, b); if (!h) return null;
         return [h[0], h[1], h[2], h[3], h[4], h[5], h[6], h[7], 1];
       }
-      function applyHomography(H, x, y) {
-        const w = H[6] * x + H[7] * y + H[8];
-        return { x: (H[0] * x + H[1] * y + H[2]) / w, y: (H[3] * x + H[4] * y + H[5]) / w };
-      }
-      const quadArea = (q) => {
-        let a = 0; for (let i = 0; i < 4; i++) { const p = q[i], n = q[(i + 1) % 4]; a += p.x * n.y - n.x * p.y; }
-        return Math.abs(a) / 2;
-      };
+      function applyHomography(H, x, y) { const w = H[6]*x + H[7]*y + H[8];
+        return { x: (H[0]*x + H[1]*y + H[2]) / w, y: (H[3]*x + H[4]*y + H[5]) / w }; }
+      const quadArea = (q) => { let a = 0; for (let i = 0; i < 4; i++) { const p = q[i], n = q[(i+1)%4]; a += p.x*n.y - n.x*p.y; } return Math.abs(a)/2; };
 
       /* ===================== FloorMapping ===================== */
       class FloorMapping {
-        constructor(imgCorners) {                 // corners in normalized mirrored-image space [0,1]
-          this.corners = imgCorners;
-          this.H = computeHomography(imgCorners, UNIT_QUAD);
-          this.Hinv = computeHomography(UNIT_QUAD, imgCorners);
-        }
+        constructor(c) { this.corners = c; this.H = computeHomography(c, UNIT_QUAD); this.Hinv = computeHomography(UNIT_QUAD, c); }
         valid() { return this.H && this.Hinv && quadArea(this.corners) > 0.01; }
-        mapFootToGrid(nx, ny) {                    // normalized image -> (u,v) grid
-          const g = applyHomography(this.H, nx, ny);
-          return { u: g.x, v: g.y };
-        }
+        mapFootToGrid(nx, ny) { const g = applyHomography(this.H, nx, ny); return { u: g.x, v: g.y }; }
         gridToImg(u, v) { return applyHomography(this.Hinv, u, v); }
       }
 
-      /* ===================== CutoutBuilder ===================== */
-      // Builds a mask-applied, mirror-flipped cutout canvas + the player's bbox & foot point.
+      /* ===================== CutoutBuilder (mirror-aware) ===================== */
       class CutoutBuilder {
-        constructor() {
-          this.canvas = document.createElement('canvas');
+        constructor() { this.canvas = document.createElement('canvas');
           this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
-          this.player = null;     // { nfx, nfy (normalized foot), bx,by,bw,bh (px) }
-          this.mw = 0; this.mh = 0;
-        }
+          this.player = null; this.mw = 0; this.mh = 0; }
         update(tracker) {
-          const video = tracker.video, mask = tracker.mask;
-          if (!mask || !video.videoWidth) { this.player = null; return; }
-          const mw = tracker.maskWidth, mh = tracker.maskHeight; this.mw = mw; this.mh = mh;
+          const video = tracker.video, mask = tracker.mask; if (!mask || !video.videoWidth) { this.player = null; return; }
+          const mw = tracker.maskWidth, mh = tracker.maskHeight, mir = tracker.mirrored; this.mw = mw; this.mh = mh;
           if (this.canvas.width !== mw || this.canvas.height !== mh) { this.canvas.width = mw; this.canvas.height = mh; }
           const ctx = this.ctx;
-          ctx.save(); ctx.setTransform(-1, 0, 0, 1, mw, 0); ctx.drawImage(video, 0, 0, mw, mh); ctx.restore();
+          ctx.save(); if (mir) ctx.setTransform(-1, 0, 0, 1, mw, 0); ctx.drawImage(video, 0, 0, mw, mh); ctx.restore();
           const frame = ctx.getImageData(0, 0, mw, mh); const px = frame.data;
           let minX = mw, minY = mh, maxX = -1, maxY = -1, count = 0, footSumX = 0, footRow = -1, footCount = 0;
-          for (let y = 0; y < mh; y++) {
-            const ro = y * mw;
+          for (let y = 0; y < mh; y++) { const ro = y * mw;
             for (let x = 0; x < mw; x++) {
-              const mv = mask[ro + (mw - 1 - x)]; const pi = (ro + x) * 4;
+              const mv = mask[ro + (mir ? (mw - 1 - x) : x)]; const pi = (ro + x) * 4;
               if (!isPerson(mv)) { px[pi + 3] = 0; continue; }
-              px[pi] = Math.min(255, px[pi] + 8); px[pi + 2] = Math.min(255, px[pi + 2] + 22);
-              count++;
+              px[pi] = Math.min(255, px[pi] + 8); px[pi + 2] = Math.min(255, px[pi + 2] + 22); count++;
               if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y;
               if (y > footRow) { footRow = y; footSumX = x; footCount = 1; } else if (y === footRow) { footSumX += x; footCount++; }
-            }
-          }
+            } }
           ctx.putImageData(frame, 0, 0);
           if (count < MIN_PERSON_PIXELS || maxX < 0) { this.player = null; return; }
           const footX = footSumX / footCount;
@@ -277,189 +306,144 @@
 
       /* ===================== WorldModel / Block / RoundConfig ===================== */
       function roundConfig(n) {
-        return {
-          n,
-          pickSeconds: Math.max(5, 15 - n * 1.5),
-          unsafeFrac: Math.min(0.7, 0.30 + n * 0.08),
-          rumbleMs: Math.max(1200, 2500 - n * 150),
+        const f = DIFF[SETTINGS.difficulty] || 1;
+        return { n,
+          pickSeconds: Math.max(4, (15 - n * 1.5) * f),
+          unsafeFrac: Math.min(0.75, (0.30 + n * 0.08) * (2 - f)),
+          rumbleMs: Math.max(1000, (2500 - n * 150) * f),
           collapseStaggerMs: Math.max(40, 160 - n * 15),
-          shakeAmp: 0.05 + n * 0.012,
-        };
+          shakeAmp: 0.05 + n * 0.012 };
       }
       class Block {
-        constructor(r, c) {
-          this.r = r; this.c = c; this.state = 'SOLID'; this.safe = true;
+        constructor(r, c) { this.r = r; this.c = c; this.state = 'SOLID'; this.safe = true;
           this.shakeSeed = Math.random() * 6.28; this.fallT = 0; this.fallDelayMs = 0; this.vy = 0;
-          this.spin = new THREE.Vector3((Math.random()-.5)*4, (Math.random()-.5)*2, (Math.random()-.5)*4);
-          this.mesh = null;
-        }
+          this.spin = new THREE.Vector3((Math.random()-.5)*4, (Math.random()-.5)*2, (Math.random()-.5)*4); this.mesh = null; }
       }
       class WorldModel {
-        constructor() {
-          this.blocks = [];
-          for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) this.blocks.push(new Block(r, c));
-          this.round = 0; this.cfg = roundConfig(0);
-        }
+        constructor() { this.round = 0; this.cfg = roundConfig(0); this.rebuild(); }
+        rebuild() { this.blocks = []; for (let r = 0; r < ROWS; r++) for (let c = 0; c < COLS; c++) this.blocks.push(new Block(r, c)); }
         at(r, c) { return (r>=0&&r<ROWS&&c>=0&&c<COLS) ? this.blocks[r*COLS+c] : null; }
-        assignRound(n) {
-          this.round = n; this.cfg = roundConfig(n);
-          const total = this.blocks.length;
-          const unsafeN = Math.min(total - 3, Math.round(total * this.cfg.unsafeFrac));
+        assignRound(n) { this.round = n; this.cfg = roundConfig(n);
+          const total = this.blocks.length, unsafeN = Math.min(total - 3, Math.round(total * this.cfg.unsafeFrac));
           const idx = [...this.blocks.keys()];
-          for (let i = idx.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [idx[i], idx[j]] = [idx[j], idx[i]]; }
+          for (let i = idx.length - 1; i > 0; i--) { const j = (Math.random()*(i+1))|0; [idx[i], idx[j]] = [idx[j], idx[i]]; }
           this.blocks.forEach((b) => { b.state = 'SOLID'; b.safe = true; b.fallT = 0; b.vy = 0; });
-          for (let i = 0; i < unsafeN; i++) this.blocks[idx[i]].safe = false;
-        }
+          for (let i = 0; i < unsafeN; i++) this.blocks[idx[i]].safe = false; }
         allUnsafeGone() { return this.blocks.every((b) => b.safe || b.state === 'GONE'); }
       }
 
       /* ===================== Procedural assets ===================== */
       function makeBrickTexture(size = 128) {
         const c = document.createElement('canvas'); c.width = c.height = size; const g = c.getContext('2d');
-        g.fillStyle = '#2c241f'; g.fillRect(0, 0, size, size);               // mortar
+        g.fillStyle = '#2c241f'; g.fillRect(0, 0, size, size);
         const bw = size / 3, bh = size / 4;
-        for (let row = 0; row * bh < size; row++) {
-          const off = (row % 2) ? bw / 2 : 0;
-          for (let x = -bw; x < size; x += bw) {
-            const px = x + off, py = row * bh, base = 86 + ((Math.random() * 38) | 0);
-            g.fillStyle = `rgb(${base},${base-24},${base-40})`;
-            g.fillRect(px + 2, py + 2, bw - 4, bh - 4);
-            g.fillStyle = 'rgba(0,0,0,.18)'; g.fillRect(px + 2, py + bh - 5, bw - 4, 3);   // bottom shade
-            g.fillStyle = 'rgba(255,235,200,.06)'; g.fillRect(px + 2, py + 2, bw - 4, 2);  // top light
-          }
-        }
+        for (let row = 0; row * bh < size; row++) { const off = (row % 2) ? bw / 2 : 0;
+          for (let x = -bw; x < size; x += bw) { const px = x + off, py = row * bh, base = 86 + ((Math.random()*38)|0);
+            g.fillStyle = `rgb(${base},${base-24},${base-40})`; g.fillRect(px + 2, py + 2, bw - 4, bh - 4);
+            g.fillStyle = 'rgba(0,0,0,.18)'; g.fillRect(px + 2, py + bh - 5, bw - 4, 3);
+            g.fillStyle = 'rgba(255,235,200,.06)'; g.fillRect(px + 2, py + 2, bw - 4, 2); } }
         const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
         t.wrapS = t.wrapT = THREE.RepeatWrapping; t.anisotropy = 2; return t;
       }
       function makeLavaMaterial() {
-        return new THREE.ShaderMaterial({
-          uniforms: { uTime: { value: 0 } },
+        return new THREE.ShaderMaterial({ uniforms: { uTime: { value: 0 } },
           vertexShader: `varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0);}`,
           fragmentShader: `precision mediump float; varying vec2 vUv; uniform float uTime;
             float hash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
             float noise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);
               return mix(mix(hash(i),hash(i+vec2(1,0)),f.x),mix(hash(i+vec2(0,1)),hash(i+vec2(1,1)),f.x),f.y);}
             void main(){ vec2 uv=vUv*5.0; uv.y+=uTime*0.25; uv.x+=sin(uTime*0.3+uv.y)*0.2;
-              float n=noise(uv)*0.6+noise(uv*2.3)*0.4;
-              vec3 hot=vec3(1.0,0.62,0.12), dk=vec3(0.45,0.04,0.0);
-              vec3 col=mix(dk,hot,smoothstep(0.25,0.85,n));
-              col+=hot*pow(smoothstep(0.7,1.0,n),2.0)*0.6;
-              gl_FragColor=vec4(col,1.0);} `,
-        });
+              float n=noise(uv)*0.6+noise(uv*2.3)*0.4; vec3 hot=vec3(1.0,0.62,0.12), dk=vec3(0.45,0.04,0.0);
+              vec3 col=mix(dk,hot,smoothstep(0.25,0.85,n)); col+=hot*pow(smoothstep(0.7,1.0,n),2.0)*0.6;
+              gl_FragColor=vec4(col,1.0);} ` });
       }
 
-      /* ===================== Billboard (player cutout in 3D) ===================== */
+      /* ===================== Billboard ===================== */
       class Billboard {
         constructor(scene, cutoutCanvas) {
-          this.tex = new THREE.CanvasTexture(cutoutCanvas);
-          this.tex.colorSpace = THREE.SRGBColorSpace; this.tex.minFilter = THREE.LinearFilter;
-          this.tex.magFilter = THREE.LinearFilter; this.tex.generateMipmaps = false;
+          this.tex = new THREE.CanvasTexture(cutoutCanvas); this.tex.colorSpace = THREE.SRGBColorSpace;
+          this.tex.minFilter = THREE.LinearFilter; this.tex.magFilter = THREE.LinearFilter; this.tex.generateMipmaps = false;
           this.mat = new THREE.MeshBasicMaterial({ map: this.tex, transparent: true, depthWrite: false, alphaTest: 0.05, side: THREE.DoubleSide });
-          this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.mat);
-          this.mesh.visible = false; scene.add(this.mesh);
-          // ring under feet
-          const rg = new THREE.RingGeometry(0.32, 0.46, 28);
+          this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.mat); this.mesh.visible = false; scene.add(this.mesh);
           this.ringMat = new THREE.MeshBasicMaterial({ color: 0x49d98a, transparent: true, opacity: 0.85, side: THREE.DoubleSide });
-          this.ring = new THREE.Mesh(rg, this.ringMat); this.ring.rotation.x = -Math.PI / 2; this.ring.visible = false;
-          scene.add(this.ring);
+          this.ring = new THREE.Mesh(new THREE.RingGeometry(0.32, 0.46, 28), this.ringMat);
+          this.ring.rotation.x = -Math.PI / 2; this.ring.visible = false; scene.add(this.ring);
         }
         update(player, mw, mh, world3, camera, onLava, out) {
           if (!player || !world3) { this.mesh.visible = false; this.ring.visible = false; return; }
           this.tex.needsUpdate = true;
-          // crop the cutout texture to the player's bbox (flipY: canvas top -> texture v)
           this.tex.offset.set(player.bx / mw, 1 - (player.by + player.bh) / mh);
           this.tex.repeat.set(player.bw / mw, player.bh / mh);
-          const aspect = player.bw / player.bh;
-          const h = 2.6, w = h * aspect;                     // life-size-ish in world units
+          const aspect = player.bw / player.bh, h = 2.6, w = h * aspect;
           this.mesh.scale.set(w, h, 1);
           this.mesh.position.set(world3.x, BLOCK_H + h / 2, world3.z);
-          // yaw-billboard: stay upright, turn to face the camera horizontally
           this.mesh.rotation.set(0, Math.atan2(camera.position.x - world3.x, camera.position.z - world3.z), 0);
-          this.mat.opacity = out ? 0.35 : 1.0;
-          this.mat.color.setHex(out ? 0xff7a55 : 0xffffff);
-          this.mesh.visible = true;
+          this.mat.opacity = out ? 0.35 : 1.0; this.mat.color.setHex(out ? 0xff7a55 : 0xffffff); this.mesh.visible = true;
           this.ring.position.set(world3.x, BLOCK_H + 0.02, world3.z);
-          this.ringMat.color.setHex(out ? 0xff5a2a : (onLava ? 0xff6a2a : 0x49d98a));
-          this.ring.visible = true;
+          this.ringMat.color.setHex(out ? 0xff5a2a : (onLava ? 0xff6a2a : 0x49d98a)); this.ring.visible = true;
         }
       }
 
-      /* ===================== StageRenderer (Three.js, mirror/virtual stage) ===================== */
+      /* ===================== StageRenderer (dynamic grid) ===================== */
       class StageRenderer {
         constructor(canvas, cutoutCanvas) {
           this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, powerPreference: 'high-performance' });
           this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-          this.scene = new THREE.Scene();
-          this.scene.background = new THREE.Color(0x0a0608);
-          this.scene.fog = new THREE.Fog(0x0a0608, 8, 28);
-
+          this.scene = new THREE.Scene(); this.scene.background = new THREE.Color(0x0a0608);
+          this.scene.fog = new THREE.Fog(0x0a0608, 8, 30);
           this.camera = new THREE.PerspectiveCamera(46, 1, 0.1, 100);
-          this.camBase = new THREE.Vector3(0, 9.0, ROWS + 5.0);
-          this.camLook = new THREE.Vector3(0, 0, ROWS * 0.5);
-          this.camera.position.copy(this.camBase); this.camera.lookAt(this.camLook);
-
+          this.camBase = new THREE.Vector3(); this.camLook = new THREE.Vector3();
           this.scene.add(new THREE.HemisphereLight(0x8899bb, 0x301808, 0.7));
           this.scene.add(new THREE.AmbientLight(0x40384a, 0.5));
           const dir = new THREE.DirectionalLight(0xffd9a0, 0.8); dir.position.set(4, 12, 8); this.scene.add(dir);
-          this.lavaLight = new THREE.PointLight(0xff6620, 0.9, 30); this.lavaLight.position.set(0, -0.5, ROWS * 0.5); this.scene.add(this.lavaLight);
-
-          // Lava plane (below blocks)
+          this.lavaLight = new THREE.PointLight(0xff6620, 0.9, 32); this.scene.add(this.lavaLight);
           this.lavaMat = makeLavaMaterial();
-          const lava = new THREE.Mesh(new THREE.PlaneGeometry(COLS + 8, ROWS + 8), this.lavaMat);
-          lava.rotation.x = -Math.PI / 2; lava.position.set(0, -0.02, ROWS / 2); this.scene.add(lava);
-
-          // Blocks (shared material)
+          this.lavaMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.lavaMat); this.lavaMesh.rotation.x = -Math.PI/2; this.scene.add(this.lavaMesh);
+          this.wallMat = new THREE.MeshStandardMaterial({ map: makeBrickTexture(), roughness: 1.0 });
+          this.wallMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.wallMat); this.scene.add(this.wallMesh);
           this.brickMat = new THREE.MeshStandardMaterial({ map: makeBrickTexture(), roughness: 0.95, metalness: 0.0 });
           this.blockGeo = new THREE.BoxGeometry(BLOCK * 0.96, BLOCK_H, BLOCK * 0.96);
-
-          // Back wall for dungeon ambiance
-          const wallMat = new THREE.MeshStandardMaterial({ map: makeBrickTexture(), roughness: 1.0 });
-          wallMat.map.repeat.set(COLS, 3);
-          const wall = new THREE.Mesh(new THREE.PlaneGeometry(COLS + 6, 6), wallMat);
-          wall.position.set(0, 2.2, -0.6); this.scene.add(wall);
-
-          this.cutoutCanvas = cutoutCanvas;
+          this.blockGroup = new THREE.Group(); this.scene.add(this.blockGroup);
           this.billboard = new Billboard(this.scene, cutoutCanvas);
-
-          this.shakeT = 0; this.rumbleAmp = 0;
+          this.rumbleAmp = 0;
           window.addEventListener('resize', () => this.resize());
           canvas.addEventListener('webglcontextlost', (e) => e.preventDefault(), false);
-          this.resize();
+          this.layoutForGrid(); this.resize();
+        }
+        layoutForGrid() {
+          this.camBase.set(0, ROWS * 1.45 + 1.5, ROWS + 5.0);
+          this.camLook.set(0, 0, ROWS * 0.5);
+          this.lavaMesh.geometry.dispose(); this.lavaMesh.geometry = new THREE.PlaneGeometry(COLS + 10, ROWS + 10);
+          this.lavaMesh.position.set(0, -0.02, ROWS / 2);
+          this.wallMesh.geometry.dispose(); this.wallMesh.geometry = new THREE.PlaneGeometry(COLS + 6, 6);
+          this.wallMesh.position.set(0, 2.2, -0.6); this.wallMat.map.repeat.set(COLS, 3);
+          this.lavaLight.position.set(0, -0.5, ROWS * 0.5);
+          this.scene.fog.far = ROWS + 22;
         }
         buildBlocks(world) {
+          while (this.blockGroup.children.length) this.blockGroup.remove(this.blockGroup.children[0]);
           world.blocks.forEach((b) => {
-            if (!b.mesh) { b.mesh = new THREE.Mesh(this.blockGeo, this.brickMat); this.scene.add(b.mesh); }
+            b.mesh = new THREE.Mesh(this.blockGeo, this.brickMat);
             b.mesh.position.set(b.c + 0.5 - COLS / 2, BLOCK_H / 2, b.r + 0.5);
-            b.mesh.rotation.set(0, 0, 0); b.mesh.visible = true;
-            b.base = b.mesh.position.clone();
+            b.base = b.mesh.position.clone(); this.blockGroup.add(b.mesh);
           });
         }
-        // (u,v) grid -> world XZ on top of the floor
         gridToWorld(u, v) { return { x: (u - 0.5) * COLS, z: v * ROWS }; }
-        resize() {
-          const w = window.innerWidth, h = window.innerHeight;
-          this.renderer.setSize(w, h, false); this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
-        }
+        resize() { const w = window.innerWidth, h = window.innerHeight;
+          this.renderer.setSize(w, h, false); this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); }
         syncBlocks(world, dt, now) {
-          for (const b of world.blocks) {
-            if (!b.mesh) continue;
-            const m = b.mesh;
+          for (const b of world.blocks) { if (!b.mesh) continue; const m = b.mesh;
             if (b.state === 'SOLID') {
-              if (this.rumbleAmp > 0) {
-                const a = this.rumbleAmp;
+              if (this.rumbleAmp > 0) { const a = this.rumbleAmp;
                 m.position.set(b.base.x + Math.sin(now*0.02 + b.shakeSeed)*a*0.5, b.base.y, b.base.z + Math.cos(now*0.023 + b.shakeSeed)*a*0.5);
               } else m.position.copy(b.base);
-            } else if (b.state === 'SHAKING') {
-              const a = world.cfg.shakeAmp * 2.2;
+            } else if (b.state === 'SHAKING') { const a = world.cfg.shakeAmp * 2.2;
               m.position.set(b.base.x + (Math.random()-.5)*a, b.base.y + (Math.random()-.5)*a*0.4, b.base.z + (Math.random()-.5)*a);
               m.rotation.set((Math.random()-.5)*0.08, 0, (Math.random()-.5)*0.08);
-            } else if (b.state === 'FALLING') {
-              b.vy -= 22 * dt; m.position.y += b.vy * dt;
-              m.position.x = b.base.x + b.spin.x * 0.02; m.position.z = b.base.z + b.spin.z * 0.02;
+            } else if (b.state === 'FALLING') { b.vy -= 22 * dt; m.position.y += b.vy * dt;
               m.rotation.x += b.spin.x * dt; m.rotation.z += b.spin.z * dt; m.rotation.y += b.spin.y * dt;
               if (m.position.y < -3) { b.state = 'GONE'; m.visible = false; }
-            } else if (b.state === 'GONE') { m.visible = false; }
-          }
+            } else if (b.state === 'GONE') { m.visible = false; } }
         }
         syncPlayer(player, mw, mh, uv, onLava, out) {
           const world3 = (player && uv) ? this.gridToWorld(uv.u, uv.v) : null;
@@ -468,238 +452,191 @@
         render(now) {
           this.lavaMat.uniforms.uTime.value = now * 0.001;
           this.lavaLight.intensity = 0.7 + Math.sin(now * 0.006) * 0.2;
-          // camera rumble
-          if (this.rumbleAmp > 0) {
-            this.camera.position.set(this.camBase.x + (Math.random()-.5)*this.rumbleAmp, this.camBase.y + (Math.random()-.5)*this.rumbleAmp, this.camBase.z);
-          } else this.camera.position.copy(this.camBase);
-          this.camera.lookAt(this.camLook);
-          this.renderer.render(this.scene, this.camera);
+          if (this.rumbleAmp > 0) this.camera.position.set(this.camBase.x + (Math.random()-.5)*this.rumbleAmp, this.camBase.y + (Math.random()-.5)*this.rumbleAmp, this.camBase.z);
+          else this.camera.position.copy(this.camBase);
+          this.camera.lookAt(this.camLook); this.renderer.render(this.scene, this.camera);
         }
       }
 
       /* ===================== HUD ===================== */
       class Hud {
-        constructor() {
-          this.el = $('hud'); this.round = $('roundPill'); this.timer = $('timer');
-          this.score = $('scorePill'); this.banner = $('banner'); this.verdict = $('verdict'); this.fps = $('fps');
-        }
+        constructor() { this.el = $('hud'); this.round = $('roundPill'); this.timer = $('timer');
+          this.score = $('scorePill'); this.banner = $('banner'); this.verdict = $('verdict'); this.fps = $('fps'); }
         show(v) { this.el.classList.toggle('show', v); }
-        setBanner(text) { this.banner.textContent = text; this.banner.style.opacity = text ? 1 : 0; }
-        update(state, timeLeft, world, present, onLava, out, score, fps) {
-          this.round.textContent = 'Round ' + (world.round + 1);
-          this.score.textContent = 'Score ' + score;
+        setBanner(t) { this.banner.textContent = t; this.banner.style.opacity = t ? 1 : 0; }
+        update(state, timeLeft, world, present, onLava, out, score) {
+          this.round.textContent = 'Round ' + (world.round + 1); this.score.textContent = 'Score ' + score;
           this.timer.textContent = (state === 'PICK') ? Math.ceil(timeLeft) : '';
-          if (!present) { this.verdict.textContent = ''; }
+          if (!present) this.verdict.textContent = '';
           else if (out) { this.verdict.textContent = 'OUT'; this.verdict.style.color = '#ff5a2a'; }
           else if (onLava) { this.verdict.textContent = 'LAVA!'; this.verdict.style.color = '#ff6a2a'; }
           else { this.verdict.textContent = 'SAFE'; this.verdict.style.color = '#7CFC7C'; }
-          if (DEBUG) this.fps.textContent = fps.toFixed(0) + ' fps';
         }
       }
 
-      /* ===================== CalibrationScreen ===================== */
+      /* ===================== CalibrationScreen (mirror-aware + flip) ===================== */
       class CalibrationScreen {
-        constructor(tracker) {
-          this.tracker = tracker;
-          this.canvas = $('calibCanvas'); this.ctx = this.canvas.getContext('2d');
-          this.ui = $('calibUi'); this.label = $('cornerLabel');
-          this.corners = []; this.dragIdx = -1; this.onDone = null;
+        constructor(tracker) { this.tracker = tracker; this.canvas = $('calibCanvas'); this.ctx = this.canvas.getContext('2d');
+          this.ui = $('calibUi'); this.label = $('cornerLabel'); this.corners = []; this.dragIdx = -1; this.onDone = null;
           this.canvas.addEventListener('pointerdown', (e) => this.onDown(e));
           this.canvas.addEventListener('pointermove', (e) => this.onMove(e));
           this.canvas.addEventListener('pointerup', () => { this.dragIdx = -1; });
           $('calibRedo').addEventListener('click', () => { this.corners = []; this.refreshLabel(); });
           $('calibConfirm').addEventListener('click', () => this.confirm());
-          this.saved = this.loadSaved();
+          $('calibFlip').addEventListener('click', () => this.flip());
         }
-        loadSaved() { try { return JSON.parse(localStorage.getItem('floorCorners') || 'null'); } catch { return null; } }
-        start(onDone) {
-          this.onDone = onDone; this.corners = [];
-          this.canvas.style.display = 'block'; this.ui.classList.add('show'); this.refreshLabel();
-          if (this.saved) { /* could offer reuse; auto-not for now */ }
-        }
+        start(onDone) { this.onDone = onDone; this.corners = [];
+          this.canvas.style.display = 'block'; this.ui.classList.add('show'); this.refreshLabel(); }
         stop() { this.canvas.style.display = 'none'; this.ui.classList.remove('show'); }
-        refreshLabel() { this.label.textContent = this.corners.length < 4 ? CORNER_LABELS[this.corners.length] : 'Confirm or Redo'; }
-        norm(e) {
-          const r = this.canvas.getBoundingClientRect();
-          return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
-        }
-        onDown(e) {
-          const p = this.norm(e);
-          // grab nearest existing corner to nudge, else add
-          let near = -1, best = 0.0025;
+        async flip() { const next = this.tracker.facing === 'user' ? 'environment' : 'user';
+          this.label.textContent = 'Switching camera…'; this.corners = [];
+          try { await this.tracker.setFacing(next); SETTINGS.facing = next; saveSettings(); } catch {}
+          this.refreshLabel(); }
+        refreshLabel() { this.label.innerHTML = this.corners.length < 4
+          ? 'Tap corner: <b>' + CORNER_LABELS[this.corners.length] + '</b>' : '<b>Confirm</b> or <b>Redo</b>'; }
+        norm(e) { const r = this.canvas.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }; }
+        onDown(e) { const p = this.norm(e); let near = -1, best = 0.0025;
           this.corners.forEach((c, i) => { const d = (c.x-p.x)**2 + (c.y-p.y)**2; if (d < best) { best = d; near = i; } });
           if (near >= 0) { this.dragIdx = near; this.corners[near] = p; }
-          else if (this.corners.length < 4) { this.corners.push(p); }
-          this.refreshLabel();
-        }
+          else if (this.corners.length < 4) this.corners.push(p);
+          this.refreshLabel(); }
         onMove(e) { if (this.dragIdx >= 0) this.corners[this.dragIdx] = this.norm(e); }
-        confirm() {
-          if (this.corners.length < 4) return;
+        confirm() { if (this.corners.length < 4) return;
           const fm = new FloorMapping(this.corners.slice());
           if (!fm.valid()) { this.label.textContent = 'Bad shape — Redo'; return; }
-          try { localStorage.setItem('floorCorners', JSON.stringify(this.corners)); } catch {}
-          this.stop(); this.onDone(fm);
-        }
-        draw() {
-          const v = this.tracker.video; if (!v.videoWidth) return;
+          this.stop(); this.onDone(fm); }
+        draw() { const v = this.tracker.video; if (!v.videoWidth) return;
           const cw = this.canvas.clientWidth, ch = this.canvas.clientHeight;
           if (this.canvas.width !== cw || this.canvas.height !== ch) { this.canvas.width = cw; this.canvas.height = ch; }
-          const g = this.ctx;
-          g.save(); g.setTransform(-1, 0, 0, 1, cw, 0); g.drawImage(v, 0, 0, cw, ch); g.restore();
-          // overlay quad + dots
+          const g = this.ctx, mir = this.tracker.mirrored;
+          g.save(); if (mir) g.setTransform(-1, 0, 0, 1, cw, 0); g.drawImage(v, 0, 0, cw, ch); g.restore();
           g.lineWidth = 3; g.strokeStyle = '#ffd27a'; g.fillStyle = '#ffd27a';
-          if (this.corners.length) {
-            g.beginPath();
-            this.corners.forEach((c, i) => { const x = c.x * cw, y = c.y * ch; i ? g.lineTo(x, y) : g.moveTo(x, y); });
-            if (this.corners.length === 4) g.closePath();
-            g.stroke();
-            this.corners.forEach((c, i) => { g.beginPath(); g.arc(c.x*cw, c.y*ch, 10, 0, 7); g.fill();
-              g.fillStyle = '#1a0d05'; g.font = 'bold 12px system-ui'; g.fillText(i+1, c.x*cw-3, c.y*ch+4); g.fillStyle = '#ffd27a'; });
-          }
+          if (this.corners.length) { g.beginPath();
+            this.corners.forEach((c, i) => { const x = c.x*cw, y = c.y*ch; i ? g.lineTo(x, y) : g.moveTo(x, y); });
+            if (this.corners.length === 4) g.closePath(); g.stroke();
+            this.corners.forEach((c, i) => { g.beginPath(); g.arc(c.x*cw, c.y*ch, 11, 0, 7); g.fill();
+              g.fillStyle = '#1a0d05'; g.font = 'bold 13px system-ui'; g.fillText(i+1, c.x*cw-3, c.y*ch+4); g.fillStyle = '#ffd27a'; }); }
         }
       }
 
-      /* ===================== GameStateMachine + App ===================== */
-      const S = { BOOT:'BOOT', CALIBRATING:'CALIBRATING', MODE_SELECT:'MODE_SELECT',
+      /* ===================== App + state machine ===================== */
+      const S = { TITLE:'TITLE', CALIBRATING:'CALIBRATING', MODE_SELECT:'MODE_SELECT',
         ROUND_INTRO:'ROUND_INTRO', PICK:'PICK', RUMBLE:'RUMBLE', COLLAPSE:'COLLAPSE', RESOLVE:'RESOLVE', GAME_OVER:'GAME_OVER' };
 
       class App {
         constructor() {
           this.tracker = new BodyTracker($('webcam'));
-          this.cutout = new CutoutBuilder();
-          this.world = new WorldModel();
-          this.hud = new Hud();
-          this.calib = new CalibrationScreen(this.tracker);
-          this.renderer = null;
-          this.floor = null;                 // FloorMapping
-          this.state = S.BOOT; this.tEnter = performance.now();
+          this.cutout = new CutoutBuilder(); this.world = new WorldModel(); this.hud = new Hud();
+          this.calib = new CalibrationScreen(this.tracker); this.renderer = null; this.floor = null;
+          this.state = S.TITLE; this.tEnter = performance.now();
           this.score = 0; this.outLatch = false; this.outFrames = 0;
           this.uv = null; this.cell = null; this.onLava = false; this.collapseStartedAt = 0;
-          this._last = performance.now(); this._fps = 0;
+          this._last = performance.now(); this._fps = 0; this.loopRunning = false;
           this.wireUi();
         }
         wireUi() {
-          $('startBtn').addEventListener('click', () => this.onStart());
+          $('btnPlay').addEventListener('click', () => this.onPlay());
+          $('btnHow').addEventListener('click', () => this.go('howto'));
+          $('btnSettings').addEventListener('click', () => { this.syncSettingsUi(); this.go('settings'); });
+          document.querySelectorAll('.backTitle').forEach((b) => b.addEventListener('click', () => this.go('title')));
+          // segmented settings controls
+          document.querySelectorAll('.seg').forEach((seg) => {
+            const key = seg.dataset.key;
+            seg.querySelectorAll('.seg-btn').forEach((btn) => btn.addEventListener('click', () => {
+              let val = btn.dataset.val; if (key === 'grid') val = parseInt(val, 10);
+              SETTINGS[key === 'grid' ? 'grid' : key] = val; saveSettings(); this.syncSettingsUi();
+            }));
+          });
           $('modeLava').addEventListener('click', () => this.beginGame());
           $('goReplay').addEventListener('click', () => { this.score = 0; this.startRound(0); });
-          $('goRecalib').addEventListener('click', () => { $('gameover').classList.remove('show'); this.toCalibrate(); });
+          $('goRecalib').addEventListener('click', () => { this.screen('gameover', false); this.toCalibrate(); });
+          $('goMenu').addEventListener('click', () => { this.screen('gameover', false); this.hud.show(false); $('stage').style.display='none'; this.setState(S.TITLE); this.go('title'); });
         }
+        syncSettingsUi() {
+          document.querySelectorAll('.seg').forEach((seg) => {
+            const key = seg.dataset.key, cur = '' + SETTINGS[key === 'grid' ? 'grid' : key];
+            seg.querySelectorAll('.seg-btn').forEach((btn) => btn.classList.toggle('active', btn.dataset.val === cur));
+          });
+        }
+        // show exactly one of the menu screens (or none)
+        go(id) { ['title','howto','settings','loading','modeselect','gameover'].forEach((s) => this.screen(s, s === id)); }
         screen(id, show) { const el = $(id); if (el) el.classList.toggle('show', show); }
         setState(s) { this.state = s; this.tEnter = performance.now(); }
         sinceEnter() { return performance.now() - this.tEnter; }
 
-        async onStart() {
-          $('startBtn').textContent = 'Loading…';
-          try { await this.tracker.init(); }
-          catch (e) { $('boot').innerHTML = '<h1>Camera error</h1><p>Allow camera access; use an https:// link on iPhone or Chrome on desktop.</p><small>'+(e.message||e)+'</small>'; return; }
-          this.screen('boot', false);
-          // Build the Three stage now that we have a cutout canvas
-          this.renderer = new StageRenderer($('stage'), this.cutout.canvas);
+        async onPlay() {
+          this.go('loading');
+          try {
+            if (!this.tracker.ready) await this.tracker.init(SETTINGS.facing);
+            else if (this.tracker.facing !== SETTINGS.facing) await this.tracker.setFacing(SETTINGS.facing);
+          } catch (e) { $('loading').innerHTML = '<h1>Camera error</h1><p>Allow camera access; use an https:// link on iPhone or Chrome on desktop.</p><small>'+(e.message||e)+'</small>'; return; }
+          // apply grid + (re)build stage
+          COLS = SETTINGS.grid; ROWS = SETTINGS.grid; this.world.rebuild();
+          if (!this.renderer) this.renderer = new StageRenderer($('stage'), this.cutout.canvas);
+          else this.renderer.layoutForGrid();
           this.renderer.buildBlocks(this.world);
+          this.go(null);
           this.toCalibrate();
-          requestAnimationFrame((t) => this.loop(t));
+          if (!this.loopRunning) { this.loopRunning = true; requestAnimationFrame((t) => this.loop(t)); }
         }
-        toCalibrate() {
-          $('stage').style.display = 'none';
-          this.setState(S.CALIBRATING);
-          this.calib.start((fm) => { this.floor = fm; this.afterCalib(); });
-        }
-        afterCalib() {
-          $('stage').style.display = 'block';
-          this.setState(S.MODE_SELECT); this.screen('modeselect', true);
-        }
-        beginGame() { this.screen('modeselect', false); this.hud.show(true); this.score = 0; this.startRound(0); }
-        startRound(n) {
-          this.screen('gameover', false); this.hud.show(true);
+        toCalibrate() { $('stage').style.display = 'none'; this.setState(S.CALIBRATING);
+          this.calib.start((fm) => { this.floor = fm; this.afterCalib(); }); }
+        afterCalib() { $('stage').style.display = 'block'; this.setState(S.MODE_SELECT); this.go('modeselect'); }
+        beginGame() { this.go(null); this.hud.show(true); this.score = 0; this.startRound(0); }
+        startRound(n) { this.screen('gameover', false); this.hud.show(true);
           this.world.assignRound(n); this.renderer.buildBlocks(this.world);
           this.renderer.rumbleAmp = 0; this.outLatch = false; this.outFrames = 0;
-          this.setState(S.ROUND_INTRO); this.hud.setBanner('ROUND ' + (n + 1));
-        }
+          this.setState(S.ROUND_INTRO); this.hud.setBanner('ROUND ' + (n + 1)); }
 
-        // ---- per-frame ----
         loop(now) {
           requestAnimationFrame((t) => this.loop(t));
           const dt = Math.min(0.05, (now - this._last) / 1000); this._last = now;
           this._fps = this._fps * 0.9 + (1 / Math.max(dt, 1e-3)) * 0.1;
-
           this.tracker.detect(performance.now());
-          if (this.state !== S.BOOT) this.cutout.update(this.tracker);
-
+          if (this.state !== S.TITLE) this.cutout.update(this.tracker);
           if (this.state === S.CALIBRATING) { this.calib.draw(); return; }
 
-          // map foot -> grid cell
           this.uv = null; this.cell = null; const p = this.cutout.player;
-          if (p && this.floor) {
-            const g = this.floor.mapFootToGrid(p.nfx, p.nfy);
-            this.uv = g;
+          if (p && this.floor) { const g = this.floor.mapFootToGrid(p.nfx, p.nfy); this.uv = g;
             const c = Math.floor(g.u * COLS), r = Math.floor(g.v * ROWS);
-            if (r >= 0 && r < ROWS && c >= 0 && c < COLS) this.cell = { r, c };
-          }
+            if (r >= 0 && r < ROWS && c >= 0 && c < COLS) this.cell = { r, c }; }
           const block = this.cell ? this.world.at(this.cell.r, this.cell.c) : null;
           this.onLava = !!(block && (block.state === 'GONE' || block.state === 'FALLING'));
 
           this.fsmUpdate(now, dt);
 
-          // OUT detection with hysteresis (only once collapse is committed)
           let out = this.outLatch;
           if ((this.state === S.COLLAPSE || this.state === S.RESOLVE) && block && !block.safe) {
             this.outFrames = this.onLava ? this.outFrames + 1 : Math.max(0, this.outFrames - 1);
-            if (this.outFrames > 6 && !this.outLatch) { this.outLatch = true; out = true; }
-          }
+            if (this.outFrames > 6 && !this.outLatch) { this.outLatch = true; out = true; } }
 
-          if (this.renderer) {
-            this.renderer.syncBlocks(this.world, dt, now);
-            this.renderer.syncPlayer(p, this.cutout.mw, this.cutout.mh, this.uv, this.onLava, out);
-            this.renderer.render(now);
-          }
-          this.hud.update(this.state, this.timeLeft(), this.world, !!p, this.onLava, out, this.score, this._fps);
-          if (DEBUG && this.cell) this.hud.fps.textContent = `${this._fps.toFixed(0)}fps  u${this.uv.u.toFixed(2)} v${this.uv.v.toFixed(2)}  r${this.cell.r}c${this.cell.c}`;
+          if (this.renderer) { this.renderer.syncBlocks(this.world, dt, now);
+            this.renderer.syncPlayer(p, this.cutout.mw, this.cutout.mh, this.uv, this.onLava, out); this.renderer.render(now); }
+          this.hud.update(this.state, this.timeLeft(), this.world, !!p, this.onLava, out, this.score);
+          if (DEBUG) this.hud.fps.textContent = `${this._fps.toFixed(0)}fps` + (this.cell ? ` u${this.uv.u.toFixed(2)} v${this.uv.v.toFixed(2)} r${this.cell.r}c${this.cell.c}` : '');
         }
-        timeLeft() {
-          if (this.state === S.PICK) return Math.max(0, this.world.cfg.pickSeconds - this.sinceEnter() / 1000);
-          return 0;
-        }
+        timeLeft() { return (this.state === S.PICK) ? Math.max(0, this.world.cfg.pickSeconds - this.sinceEnter()/1000) : 0; }
         fsmUpdate(now, dt) {
           const t = this.sinceEnter();
           switch (this.state) {
-            case S.ROUND_INTRO:
-              if (t > 1600) { this.hud.setBanner(''); this.setState(S.PICK); }
-              break;
-            case S.PICK:
-              if (t / 1000 >= this.world.cfg.pickSeconds) { this.setState(S.RUMBLE); this.renderer.rumbleAmp = 0.12; this.hud.setBanner('RUMBLE…'); }
-              break;
-            case S.RUMBLE:
-              this.renderer.rumbleAmp = 0.10 + Math.sin(now * 0.02) * 0.04;
-              if (t > this.world.cfg.rumbleMs) {
-                this.renderer.rumbleAmp = 0; this.hud.setBanner('COLLAPSE!');
-                // commit unsafe blocks to shake then fall (staggered)
-                let k = 0;
-                for (const b of this.world.blocks) if (!b.safe) { b.state = 'SHAKING'; b.fallDelayMs = 600 + (k++) * this.world.cfg.collapseStaggerMs; }
-                this.collapseStartedAt = now; this.setState(S.COLLAPSE);
-              }
-              break;
-            case S.COLLAPSE: {
-              const el = now - this.collapseStartedAt;
+            case S.ROUND_INTRO: if (t > 1600) { this.hud.setBanner(''); this.setState(S.PICK); } break;
+            case S.PICK: if (t/1000 >= this.world.cfg.pickSeconds) { this.setState(S.RUMBLE); this.renderer.rumbleAmp = 0.12; this.hud.setBanner('RUMBLE…'); } break;
+            case S.RUMBLE: this.renderer.rumbleAmp = 0.10 + Math.sin(now*0.02)*0.04;
+              if (t > this.world.cfg.rumbleMs) { this.renderer.rumbleAmp = 0; this.hud.setBanner('COLLAPSE!');
+                let k = 0; for (const b of this.world.blocks) if (!b.safe) { b.state = 'SHAKING'; b.fallDelayMs = 600 + (k++)*this.world.cfg.collapseStaggerMs; }
+                this.collapseStartedAt = now; this.setState(S.COLLAPSE); } break;
+            case S.COLLAPSE: { const el = now - this.collapseStartedAt;
               for (const b of this.world.blocks) if (b.state === 'SHAKING' && el > b.fallDelayMs) b.state = 'FALLING';
-              if (this.world.allUnsafeGone()) { this.hud.setBanner(''); this.setState(S.RESOLVE); }
-              break;
-            }
-            case S.RESOLVE:
-              if (t > 1500) {
-                const survived = !this.outLatch;
-                if (survived) this.score += (this.world.round + 1) * 10;
-                if (survived && this.world.round < 9) { this.startRound(this.world.round + 1); }
-                else { this.endGame(survived); }
-              }
-              break;
+              if (this.world.allUnsafeGone()) { this.hud.setBanner(''); this.setState(S.RESOLVE); } break; }
+            case S.RESOLVE: if (t > 1500) { const survived = !this.outLatch;
+              if (survived) this.score += (this.world.round + 1) * 10;
+              if (survived && this.world.round < 9) this.startRound(this.world.round + 1); else this.endGame(survived); } break;
           }
         }
-        endGame(survived) {
-          this.setState(S.GAME_OVER); this.hud.show(false);
+        endGame(survived) { this.setState(S.GAME_OVER); this.hud.show(false);
           $('goTitle').textContent = survived ? 'You cleared every round! 🏆' : 'You fell in the lava! 🔥';
           $('goSub').textContent = `Reached round ${this.world.round + 1} · Score ${this.score}`;
-          this.screen('gameover', true);
-        }
+          this.screen('gameover', true); }
       }
 
       new App();
