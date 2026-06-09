@@ -25,6 +25,11 @@
       #stage { z-index: 2; }
       #fgCanvas { z-index: 3; pointer-events: none; }
       #calibCanvas { z-index: 4; display: none; touch-action: none; }
+      #vignette { position: fixed; inset: 0; z-index: 4; pointer-events: none; display: none;
+        background:
+          radial-gradient(ellipse at 50% 46%, rgba(0,0,0,0) 30%, rgba(0,0,0,0.45) 78%, rgba(0,0,0,0.72) 100%),
+          radial-gradient(ellipse at 50% 8%, rgba(255,140,50,0.10), rgba(0,0,0,0) 45%); }
+      #vignette.show { display: block; }
       #webcam { position: fixed; left: -9999px; top: -9999px; width: 1px; height: 1px; }
 
       .screen {
@@ -95,6 +100,7 @@
     <canvas id="stage"></canvas>
     <canvas id="fgCanvas"></canvas>
     <canvas id="calibCanvas"></canvas>
+    <div id="vignette"></div>
     <video id="webcam" autoplay playsinline muted></video>
 
     <!-- Title / main menu -->
@@ -438,6 +444,7 @@
           this.blockGeo = new THREE.BoxGeometry(BLOCK * 0.96, BLOCK_H, BLOCK * 0.96);
           this.blockGroup = new THREE.Group(); this.scene.add(this.blockGroup);
           this.billboard = new Billboard(this.scene, cutoutCanvas);
+          this.embers = null; this._initEmbers();
           this.rumbleAmp = 0;
           window.addEventListener('resize', () => this.resize());
           canvas.addEventListener('webglcontextlost', (e) => e.preventDefault(), false);
@@ -449,7 +456,33 @@
           this.lavaMesh.geometry.dispose(); this.lavaMesh.geometry = new THREE.PlaneGeometry(COLS, ROWS);
           this.lavaMesh.position.set(0, -0.02, ROWS / 2);          // lava fills exactly the tapped floor
           this.lavaLight.position.set(0, -0.5, ROWS * 0.5);
+          this.scene.fog = new THREE.Fog(0x140a06, 6, ROWS + 22); // dungeon depth haze on the stone
+          this._initEmbers();
           this._poseCamera();
+        }
+        _initEmbers() {
+          const N = 70;
+          if (!this.embers) {
+            this.emberN = N; this.emberPos = new Float32Array(N * 3); this.emberVel = new Float32Array(N);
+            this.emberGeo = new THREE.BufferGeometry();
+            this.emberGeo.setAttribute('position', new THREE.BufferAttribute(this.emberPos, 3));
+            this.emberMat = new THREE.PointsMaterial({ color: 0xff7a2a, size: 0.13, transparent: true,
+              opacity: 0.9, depthWrite: false, blending: THREE.AdditiveBlending });
+            this.embers = new THREE.Points(this.emberGeo, this.emberMat); this.scene.add(this.embers);
+          }
+          for (let i = 0; i < this.emberN; i++) this._seedEmber(i, Math.random() * 3.2);
+          this.emberGeo.attributes.position.needsUpdate = true;
+        }
+        _seedEmber(i, y) {
+          this.emberPos[i*3] = (Math.random() - 0.5) * COLS;
+          this.emberPos[i*3+1] = y;
+          this.emberPos[i*3+2] = Math.random() * ROWS;
+          this.emberVel[i] = 0.3 + Math.random() * 0.7;
+        }
+        _updateEmbers(dt) {
+          for (let i = 0; i < this.emberN; i++) { this.emberPos[i*3+1] += this.emberVel[i] * dt;
+            if (this.emberPos[i*3+1] > 3.6) this._seedEmber(i, 0); }
+          this.emberGeo.attributes.position.needsUpdate = true;
         }
         setCameraFromCorners(corners) { this.calibCorners = corners; this._poseCamera(); }
         _poseCamera() {
@@ -489,6 +522,7 @@
               m.rotation.x += b.spin.x * dt; m.rotation.z += b.spin.z * dt; m.rotation.y += b.spin.y * dt;
               if (m.position.y < -3) { b.state = 'GONE'; m.visible = false; }
             } else if (b.state === 'GONE') { m.visible = false; } }
+          this._updateEmbers(dt);
         }
         syncPlayer(player, mw, mh, uv, onLava, out) {
           const world3 = (player && uv) ? this.gridToWorld(uv.u, uv.v) : null;
@@ -496,7 +530,7 @@
         }
         render(now) {
           this.lavaMat.uniforms.uTime.value = now * 0.001;
-          this.lavaLight.intensity = 0.7 + Math.sin(now * 0.006) * 0.2;
+          this.lavaLight.intensity = 0.7 + Math.sin(now * 0.006) * 0.2 + Math.random() * 0.18; // torch flicker
           if (this.poseMatrix) {
             const m = this._tmp.copy(this.poseMatrix);
             if (this.rumbleAmp > 0) { m.elements[12] += (Math.random()-.5)*this.rumbleAmp; m.elements[13] += (Math.random()-.5)*this.rumbleAmp; }
@@ -606,7 +640,7 @@
           $('modeLava').addEventListener('click', () => this.beginGame());
           $('goReplay').addEventListener('click', () => { this.score = 0; this.startRound(0); });
           $('goRecalib').addEventListener('click', () => { this.screen('gameover', false); this.toCalibrate(); });
-          $('goMenu').addEventListener('click', () => { this.screen('gameover', false); this.hud.show(false); $('stage').style.display='none'; this.setState(S.TITLE); this.go('title'); });
+          $('goMenu').addEventListener('click', () => { this.screen('gameover', false); this.hud.show(false); $('stage').style.display='none'; $('vignette').classList.remove('show'); this.setState(S.TITLE); this.go('title'); });
         }
         syncSettingsUi() {
           document.querySelectorAll('.seg').forEach((seg) => {
@@ -637,14 +671,18 @@
         }
         toCalibrate() { $('stage').style.display = 'none'; this.setState(S.CALIBRATING);
           this.calib.start((fm) => { this.floor = fm; this.afterCalib(); }); }
-        afterCalib() { $('stage').style.display = 'block';
+        afterCalib() { $('stage').style.display = 'block'; $('vignette').classList.add('show');
           if (this.renderer) this.renderer.setCameraFromCorners(this.floor.corners);
           this.setState(S.MODE_SELECT); this.go('modeselect'); }
         drawRoom() { const v = this.tracker.video; if (!v.videoWidth) return;
           const c = this.bgCanvas, cw = c.clientWidth, ch = c.clientHeight;
           if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
-          const g = this.bgCtx; g.save(); if (this.tracker.mirrored) g.setTransform(-1, 0, 0, 1, cw, 0);
-          g.drawImage(v, 0, 0, cw, ch); g.restore(); }
+          const g = this.bgCtx;
+          g.save(); if (this.tracker.mirrored) g.setTransform(-1, 0, 0, 1, cw, 0);
+          g.drawImage(v, 0, 0, cw, ch); g.restore();
+          // dungeon grade: warm torchlight multiply + a dark wash so the room reads as a dungeon
+          g.globalCompositeOperation = 'multiply'; g.fillStyle = '#6b4a2e'; g.fillRect(0, 0, cw, ch);
+          g.globalCompositeOperation = 'source-over'; g.fillStyle = 'rgba(8,4,2,0.28)'; g.fillRect(0, 0, cw, ch); }
         drawCutoutOverlay() { const c = this.fgCanvas, cw = c.clientWidth, ch = c.clientHeight;
           if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
           const g = this.fgCtx; g.clearRect(0, 0, cw, ch);
