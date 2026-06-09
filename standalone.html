@@ -24,7 +24,7 @@
       #bgCanvas { z-index: 1; background: #07060a; }
       #stage { z-index: 2; }
       #fgCanvas { z-index: 3; pointer-events: none; }
-      #calibCanvas { z-index: 4; display: none; touch-action: none; }
+      #calibCanvas { z-index: 6; display: none; touch-action: none; }
       #vignette { position: fixed; inset: 0; z-index: 4; pointer-events: none; display: none;
         background:
           radial-gradient(ellipse at 50% 46%, rgba(0,0,0,0) 30%, rgba(0,0,0,0.45) 78%, rgba(0,0,0,0.72) 100%),
@@ -67,7 +67,8 @@
       .seg-btn.active { background: #ffb347; color: #1a0d05; }
 
       /* Calibration overlay UI */
-      #calibUi { position: fixed; inset: 0; z-index: 3; display: none; pointer-events: none; }
+      #calibUi { position: fixed; inset: 0; z-index: 7; display: none; pointer-events: none; }
+      .btn.disabled { opacity: .45; }
       #calibUi.show { display: block; }
       #calibHint {
         position: absolute; top: calc(14px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
@@ -160,7 +161,7 @@
       <div id="calibBtns">
         <button id="calibFlip" class="btn ghost sm">🔄 Flip camera</button>
         <button id="calibRedo" class="btn ghost sm">Redo</button>
-        <button id="calibConfirm" class="btn green sm">Confirm</button>
+        <button id="calibConfirm" class="btn green sm disabled">✓ Confirm</button>
       </div>
     </div>
 
@@ -596,6 +597,10 @@
           $('calibRedo').addEventListener('click', () => { this.corners = []; this.refreshLabel(); });
           $('calibConfirm').addEventListener('click', () => this.confirm());
           $('calibFlip').addEventListener('click', () => this.flip());
+          // laptop conveniences: Enter = confirm, Backspace = redo
+          window.addEventListener('keydown', (e) => { if (this.canvas.style.display === 'none') return;
+            if (e.key === 'Enter') this.confirm();
+            else if (e.key === 'Backspace') { e.preventDefault(); this.corners = []; this.refreshLabel(); } });
         }
         start(onDone) { this.onDone = onDone; this.corners = [];
           this.canvas.style.display = 'block'; this.ui.classList.add('show'); this.refreshLabel(); }
@@ -604,8 +609,11 @@
           this.label.textContent = 'Switching camera…'; this.corners = [];
           try { await this.tracker.setFacing(next); SETTINGS.facing = next; saveSettings(); } catch {}
           this.refreshLabel(); }
-        refreshLabel() { this.label.innerHTML = this.corners.length < 4
-          ? 'Tap corner: <b>' + CORNER_LABELS[this.corners.length] + '</b>' : '<b>Confirm</b> or <b>Redo</b>'; }
+        refreshLabel() {
+          this.label.innerHTML = this.corners.length < 4
+            ? 'Tap/click corner: <b>' + CORNER_LABELS[this.corners.length] + '</b>'
+            : 'Tap <b>✓ Confirm</b> to start (or Redo)';
+          $('calibConfirm').classList.toggle('disabled', this.corners.length < 4); }
         norm(e) { const r = this.canvas.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }; }
         onDown(e) { const p = this.norm(e); let near = -1, best = 0.0025;
           this.corners.forEach((c, i) => { const d = (c.x-p.x)**2 + (c.y-p.y)**2; if (d < best) { best = d; near = i; } });
