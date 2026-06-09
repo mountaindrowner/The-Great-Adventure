@@ -20,9 +20,11 @@
         font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif;
         -webkit-user-select: none; user-select: none; -webkit-tap-highlight-color: transparent;
       }
-      #stage, #calibCanvas { position: fixed; inset: 0; width: 100vw; height: 100dvh; display: block; }
-      #stage { z-index: 1; }
-      #calibCanvas { z-index: 2; display: none; touch-action: none; }
+      #bgCanvas, #stage, #fgCanvas, #calibCanvas { position: fixed; inset: 0; width: 100vw; height: 100dvh; display: block; }
+      #bgCanvas { z-index: 1; background: #07060a; }
+      #stage { z-index: 2; }
+      #fgCanvas { z-index: 3; pointer-events: none; }
+      #calibCanvas { z-index: 4; display: none; touch-action: none; }
       #webcam { position: fixed; left: -9999px; top: -9999px; width: 1px; height: 1px; }
 
       .screen {
@@ -89,7 +91,9 @@
     </style>
   </head>
   <body>
+    <canvas id="bgCanvas"></canvas>
     <canvas id="stage"></canvas>
+    <canvas id="fgCanvas"></canvas>
     <canvas id="calibCanvas"></canvas>
     <video id="webcam" autoplay playsinline muted></video>
 
@@ -268,6 +272,38 @@
         return { x: (H[0]*x + H[1]*y + H[2]) / w, y: (H[3]*x + H[4]*y + H[5]) / w }; }
       const quadArea = (q) => { let a = 0; for (let i = 0; i < 4; i++) { const p = q[i], n = q[(i+1)%4]; a += p.x*n.y - n.x*p.y; } return Math.abs(a)/2; };
 
+      /* ===================== Camera pose from 4 floor corners (validated) ===================== */
+      const _sub=(a,b)=>[a[0]-b[0],a[1]-b[1],a[2]-b[2]];
+      const _cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
+      const _dot=(a,b)=>a[0]*b[0]+a[1]*b[1]+a[2]*b[2];
+      const _norm=(a)=>Math.hypot(a[0],a[1],a[2]);
+      const _sc=(a,s)=>[a[0]*s,a[1]*s,a[2]*s];
+      const _nz=(a)=>_sc(a,1/_norm(a));
+      const _T3=(M)=>[[M[0][0],M[1][0],M[2][0]],[M[0][1],M[1][1],M[2][1]],[M[0][2],M[1][2],M[2][2]]];
+      const _mv=(M,v)=>[_dot(M[0],v),_dot(M[1],v),_dot(M[2],v)];
+      // corners: normalized [0,1] image, order FL,FR,NR,NL. World floor rect at y=0.
+      // Returns { Rcw (camera->world rotation, cols), C (camera centre) } or null.
+      function poseFromCorners(corners, fovY, aspect, cols, rows) {
+        const sy = 1 / Math.tan(fovY / 2), sx = sy / aspect;
+        const ndc = corners.map((c) => ({ x: 2*c.x - 1, y: 1 - 2*c.y }));
+        const src = [ {x:-cols/2,y:0}, {x:cols/2,y:0}, {x:cols/2,y:rows}, {x:-cols/2,y:rows} ];
+        const H = computeHomography(src, ndc); if (!H) return null;
+        const G = [[H[0],H[1],H[2]],[H[3],H[4],H[5]],[H[6],H[7],H[8]]];
+        const B = [[G[0][0]/sx,G[0][1]/sx,G[0][2]/sx],[G[1][0]/sy,G[1][1]/sy,G[1][2]/sy],[-G[2][0],-G[2][1],-G[2][2]]];
+        const col = (M,j) => [M[0][j],M[1][j],M[2][j]];
+        let a = col(B,0), c = col(B,1), t = col(B,2);
+        const s = (_norm(a) + _norm(c)) / 2; if (s < 1e-9) return null;
+        a = _nz(a); c = _nz(c); t = _sc(t, 1/s);
+        if (t[2] > 0) { a = _sc(a,-1); c = _sc(c,-1); t = _sc(t,-1); }
+        c = _nz(_sub(c, _sc(a, _dot(a,c))));           // orthonormalize, keep a as world x-axis
+        let b = _nz(_cross(c,a)); c = _cross(a,b);
+        const Rwv = [[a[0],b[0],c[0]],[a[1],b[1],c[1]],[a[2],b[2],c[2]]];
+        const Rcw = _T3(Rwv);
+        const C = _sc(_mv(Rcw, t), -1);
+        return { Rcw, C };
+      }
+      const FOV_Y = 55;   // assumed vertical field of view (deg); tweak if alignment is slightly off
+
       /* ===================== FloorMapping ===================== */
       class FloorMapping {
         constructor(c) { this.corners = c; this.H = computeHomography(c, UNIT_QUAD); this.Hinv = computeHomography(UNIT_QUAD, c); }
@@ -369,17 +405,12 @@
           this.ring = new THREE.Mesh(new THREE.RingGeometry(0.32, 0.46, 28), this.ringMat);
           this.ring.rotation.x = -Math.PI / 2; this.ring.visible = false; scene.add(this.ring);
         }
+        // The person is composited as a 2D overlay on top (fgCanvas), so here we only
+        // place the glowing foot-ring on the floor at the player's mapped position.
         update(player, mw, mh, world3, camera, onLava, out) {
-          if (!player || !world3) { this.mesh.visible = false; this.ring.visible = false; return; }
-          this.tex.needsUpdate = true;
-          this.tex.offset.set(player.bx / mw, 1 - (player.by + player.bh) / mh);
-          this.tex.repeat.set(player.bw / mw, player.bh / mh);
-          const aspect = player.bw / player.bh, h = 2.6, w = h * aspect;
-          this.mesh.scale.set(w, h, 1);
-          this.mesh.position.set(world3.x, BLOCK_H + h / 2, world3.z);
-          this.mesh.rotation.set(0, Math.atan2(camera.position.x - world3.x, camera.position.z - world3.z), 0);
-          this.mat.opacity = out ? 0.35 : 1.0; this.mat.color.setHex(out ? 0xff7a55 : 0xffffff); this.mesh.visible = true;
-          this.ring.position.set(world3.x, BLOCK_H + 0.02, world3.z);
+          this.mesh.visible = false;
+          if (!player || !world3) { this.ring.visible = false; return; }
+          this.ring.position.set(world3.x, BLOCK_H + 0.03, world3.z);
           this.ringMat.color.setHex(out ? 0xff5a2a : (onLava ? 0xff6a2a : 0x49d98a)); this.ring.visible = true;
         }
       }
@@ -387,12 +418,13 @@
       /* ===================== StageRenderer (dynamic grid) ===================== */
       class StageRenderer {
         constructor(canvas, cutoutCanvas) {
-          this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, powerPreference: 'high-performance' });
+          this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: true, powerPreference: 'high-performance' });
           this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-          this.scene = new THREE.Scene(); this.scene.background = new THREE.Color(0x0a0608);
-          this.scene.fog = new THREE.Fog(0x0a0608, 8, 30);
-          this.camera = new THREE.PerspectiveCamera(46, 1, 0.1, 100);
+          this.renderer.setClearColor(0x000000, 0);        // transparent: real-room canvas shows behind
+          this.scene = new THREE.Scene();                  // no background / no fog (AR overlay)
+          this.camera = new THREE.PerspectiveCamera(FOV_Y, 1, 0.1, 100);
           this.camBase = new THREE.Vector3(); this.camLook = new THREE.Vector3();
+          this.poseMatrix = null; this.calibCorners = null; this._tmp = new THREE.Matrix4();
           this.scene.add(new THREE.HemisphereLight(0x8899bb, 0x301808, 0.7));
           this.scene.add(new THREE.AmbientLight(0x40384a, 0.5));
           const dir = new THREE.DirectionalLight(0xffd9a0, 0.8); dir.position.set(4, 12, 8); this.scene.add(dir);
@@ -400,7 +432,8 @@
           this.lavaMat = makeLavaMaterial();
           this.lavaMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.lavaMat); this.lavaMesh.rotation.x = -Math.PI/2; this.scene.add(this.lavaMesh);
           this.wallMat = new THREE.MeshStandardMaterial({ map: makeBrickTexture(), roughness: 1.0 });
-          this.wallMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.wallMat); this.scene.add(this.wallMesh);
+          this.wallMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.wallMat);
+          this.wallMesh.visible = false; this.scene.add(this.wallMesh);   // real room is the backdrop now
           this.brickMat = new THREE.MeshStandardMaterial({ map: makeBrickTexture(), roughness: 0.95, metalness: 0.0 });
           this.blockGeo = new THREE.BoxGeometry(BLOCK * 0.96, BLOCK_H, BLOCK * 0.96);
           this.blockGroup = new THREE.Group(); this.scene.add(this.blockGroup);
@@ -411,14 +444,25 @@
           this.layoutForGrid(); this.resize();
         }
         layoutForGrid() {
-          this.camBase.set(0, ROWS * 1.45 + 1.5, ROWS + 5.0);
+          this.camBase.set(0, ROWS * 1.45 + 1.5, ROWS + 5.0);     // fallback camera if no calibration
           this.camLook.set(0, 0, ROWS * 0.5);
-          this.lavaMesh.geometry.dispose(); this.lavaMesh.geometry = new THREE.PlaneGeometry(COLS + 10, ROWS + 10);
-          this.lavaMesh.position.set(0, -0.02, ROWS / 2);
-          this.wallMesh.geometry.dispose(); this.wallMesh.geometry = new THREE.PlaneGeometry(COLS + 6, 6);
-          this.wallMesh.position.set(0, 2.2, -0.6); this.wallMat.map.repeat.set(COLS, 3);
+          this.lavaMesh.geometry.dispose(); this.lavaMesh.geometry = new THREE.PlaneGeometry(COLS, ROWS);
+          this.lavaMesh.position.set(0, -0.02, ROWS / 2);          // lava fills exactly the tapped floor
           this.lavaLight.position.set(0, -0.5, ROWS * 0.5);
-          this.scene.fog.far = ROWS + 22;
+          this._poseCamera();
+        }
+        setCameraFromCorners(corners) { this.calibCorners = corners; this._poseCamera(); }
+        _poseCamera() {
+          if (!this.calibCorners) { this.poseMatrix = null; return; }
+          const pose = poseFromCorners(this.calibCorners, this.camera.fov * Math.PI / 180, this.camera.aspect, COLS, ROWS);
+          if (!pose) { this.poseMatrix = null; return; }
+          const R = pose.Rcw;
+          const m = new THREE.Matrix4();
+          m.makeBasis(new THREE.Vector3(R[0][0], R[1][0], R[2][0]),
+                      new THREE.Vector3(R[0][1], R[1][1], R[2][1]),
+                      new THREE.Vector3(R[0][2], R[1][2], R[2][2]));
+          m.setPosition(pose.C[0], pose.C[1], pose.C[2]);
+          this.poseMatrix = m;
         }
         buildBlocks(world) {
           while (this.blockGroup.children.length) this.blockGroup.remove(this.blockGroup.children[0]);
@@ -430,7 +474,8 @@
         }
         gridToWorld(u, v) { return { x: (u - 0.5) * COLS, z: v * ROWS }; }
         resize() { const w = window.innerWidth, h = window.innerHeight;
-          this.renderer.setSize(w, h, false); this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); }
+          this.renderer.setSize(w, h, false); this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
+          this._poseCamera(); }
         syncBlocks(world, dt, now) {
           for (const b of world.blocks) { if (!b.mesh) continue; const m = b.mesh;
             if (b.state === 'SOLID') {
@@ -452,9 +497,18 @@
         render(now) {
           this.lavaMat.uniforms.uTime.value = now * 0.001;
           this.lavaLight.intensity = 0.7 + Math.sin(now * 0.006) * 0.2;
-          if (this.rumbleAmp > 0) this.camera.position.set(this.camBase.x + (Math.random()-.5)*this.rumbleAmp, this.camBase.y + (Math.random()-.5)*this.rumbleAmp, this.camBase.z);
-          else this.camera.position.copy(this.camBase);
-          this.camera.lookAt(this.camLook); this.renderer.render(this.scene, this.camera);
+          if (this.poseMatrix) {
+            const m = this._tmp.copy(this.poseMatrix);
+            if (this.rumbleAmp > 0) { m.elements[12] += (Math.random()-.5)*this.rumbleAmp; m.elements[13] += (Math.random()-.5)*this.rumbleAmp; }
+            this.camera.matrixAutoUpdate = false;
+            this.camera.matrix.copy(m); this.camera.matrixWorldNeedsUpdate = true;  // renderer copies matrix->matrixWorld + inverse
+          } else {
+            this.camera.matrixAutoUpdate = true;
+            if (this.rumbleAmp > 0) this.camera.position.set(this.camBase.x + (Math.random()-.5)*this.rumbleAmp, this.camBase.y + (Math.random()-.5)*this.rumbleAmp, this.camBase.z);
+            else this.camera.position.copy(this.camBase);
+            this.camera.lookAt(this.camLook);
+          }
+          this.renderer.render(this.scene, this.camera);
         }
       }
 
@@ -528,6 +582,8 @@
           this.tracker = new BodyTracker($('webcam'));
           this.cutout = new CutoutBuilder(); this.world = new WorldModel(); this.hud = new Hud();
           this.calib = new CalibrationScreen(this.tracker); this.renderer = null; this.floor = null;
+          this.bgCanvas = $('bgCanvas'); this.bgCtx = this.bgCanvas.getContext('2d');
+          this.fgCanvas = $('fgCanvas'); this.fgCtx = this.fgCanvas.getContext('2d');
           this.state = S.TITLE; this.tEnter = performance.now();
           this.score = 0; this.outLatch = false; this.outFrames = 0;
           this.uv = null; this.cell = null; this.onLava = false; this.collapseStartedAt = 0;
@@ -581,7 +637,18 @@
         }
         toCalibrate() { $('stage').style.display = 'none'; this.setState(S.CALIBRATING);
           this.calib.start((fm) => { this.floor = fm; this.afterCalib(); }); }
-        afterCalib() { $('stage').style.display = 'block'; this.setState(S.MODE_SELECT); this.go('modeselect'); }
+        afterCalib() { $('stage').style.display = 'block';
+          if (this.renderer) this.renderer.setCameraFromCorners(this.floor.corners);
+          this.setState(S.MODE_SELECT); this.go('modeselect'); }
+        drawRoom() { const v = this.tracker.video; if (!v.videoWidth) return;
+          const c = this.bgCanvas, cw = c.clientWidth, ch = c.clientHeight;
+          if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
+          const g = this.bgCtx; g.save(); if (this.tracker.mirrored) g.setTransform(-1, 0, 0, 1, cw, 0);
+          g.drawImage(v, 0, 0, cw, ch); g.restore(); }
+        drawCutoutOverlay() { const c = this.fgCanvas, cw = c.clientWidth, ch = c.clientHeight;
+          if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
+          const g = this.fgCtx; g.clearRect(0, 0, cw, ch);
+          const cut = this.cutout.canvas; if (cut.width) g.drawImage(cut, 0, 0, cw, ch); }
         beginGame() { this.go(null); this.hud.show(true); this.score = 0; this.startRound(0); }
         startRound(n) { this.screen('gameover', false); this.hud.show(true);
           this.world.assignRound(n); this.renderer.buildBlocks(this.world);
@@ -593,7 +660,8 @@
           const dt = Math.min(0.05, (now - this._last) / 1000); this._last = now;
           this._fps = this._fps * 0.9 + (1 / Math.max(dt, 1e-3)) * 0.1;
           this.tracker.detect(performance.now());
-          if (this.state !== S.TITLE) this.cutout.update(this.tracker);
+          if (this.state === S.TITLE) return;
+          this.cutout.update(this.tracker);
           if (this.state === S.CALIBRATING) { this.calib.draw(); return; }
 
           this.uv = null; this.cell = null; const p = this.cutout.player;
@@ -610,8 +678,10 @@
             this.outFrames = this.onLava ? this.outFrames + 1 : Math.max(0, this.outFrames - 1);
             if (this.outFrames > 6 && !this.outLatch) { this.outLatch = true; out = true; } }
 
+          this.drawRoom();
           if (this.renderer) { this.renderer.syncBlocks(this.world, dt, now);
             this.renderer.syncPlayer(p, this.cutout.mw, this.cutout.mh, this.uv, this.onLava, out); this.renderer.render(now); }
+          this.drawCutoutOverlay();
           this.hud.update(this.state, this.timeLeft(), this.world, !!p, this.onLava, out, this.score);
           if (DEBUG) this.hud.fps.textContent = `${this._fps.toFixed(0)}fps` + (this.cell ? ` u${this.uv.u.toFixed(2)} v${this.uv.v.toFixed(2)} r${this.cell.r}c${this.cell.c}` : '');
         }
