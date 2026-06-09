@@ -322,27 +322,55 @@
       class CutoutBuilder {
         constructor() { this.canvas = document.createElement('canvas');
           this.ctx = this.canvas.getContext('2d', { willReadFrequently: true });
-          this.player = null; this.mw = 0; this.mh = 0; }
+          this.players = []; this.player = null; this.mw = 0; this.mh = 0;
+          this._pa = null; this._hb = null; this._cc = null; this._ct = null; this._cb = null; }
         update(tracker) {
-          const video = tracker.video, mask = tracker.mask; if (!mask || !video.videoWidth) { this.player = null; return; }
-          const mw = tracker.maskWidth, mh = tracker.maskHeight, mir = tracker.mirrored; this.mw = mw; this.mh = mh;
+          const video = tracker.video, mask = tracker.mask;
+          if (!mask || !video.videoWidth) { this.players = []; this.player = null; return; }
+          const mw = tracker.maskWidth, mh = tracker.maskHeight, mir = tracker.mirrored, N = mw * mh;
+          this.mw = mw; this.mh = mh;
           if (this.canvas.width !== mw || this.canvas.height !== mh) { this.canvas.width = mw; this.canvas.height = mh; }
+          if (!this._pa || this._pa.length !== N) { this._pa = new Uint8Array(N); this._hb = new Uint16Array(N); }
+          if (!this._cc || this._cc.length !== mw) { this._cc = new Int32Array(mw); this._ct = new Int32Array(mw); this._cb = new Int32Array(mw); }
+          const PA = this._pa, HB = this._hb, CC = this._cc, CT = this._ct, CB = this._cb;
+          CC.fill(0); CT.fill(mh); CB.fill(-1);
           const ctx = this.ctx;
           ctx.save(); if (mir) ctx.setTransform(-1, 0, 0, 1, mw, 0); ctx.drawImage(video, 0, 0, mw, mh); ctx.restore();
           const frame = ctx.getImageData(0, 0, mw, mh); const px = frame.data;
-          let minX = mw, minY = mh, maxX = -1, maxY = -1, count = 0, footSumX = 0, footRow = -1, footCount = 0;
+          // binary person mask + per-column extents
           for (let y = 0; y < mh; y++) { const ro = y * mw;
-            for (let x = 0; x < mw; x++) {
-              const mv = mask[ro + (mir ? (mw - 1 - x) : x)]; const pi = (ro + x) * 4;
-              if (!isPerson(mv)) { px[pi + 3] = 0; continue; }
-              px[pi] = Math.min(255, px[pi] + 8); px[pi + 2] = Math.min(255, px[pi + 2] + 22); count++;
-              if (x < minX) minX = x; if (x > maxX) maxX = x; if (y < minY) minY = y; if (y > maxY) maxY = y;
-              if (y > footRow) { footRow = y; footSumX = x; footCount = 1; } else if (y === footRow) { footSumX += x; footCount++; }
-            } }
+            for (let x = 0; x < mw; x++) { const person = isPerson(mask[ro + (mir ? (mw - 1 - x) : x)]) ? 1 : 0;
+              PA[ro + x] = person; if (person) { CC[x]++; if (y < CT[x]) CT[x] = y; CB[x] = y; } } }
+          // feather: separable box blur of the binary mask -> soft anti-aliased alpha
+          const R = 3, win = 2 * R + 1, area = win * win;
+          for (let y = 0; y < mh; y++) { const ro = y * mw; let s = 0;
+            for (let x = 0; x <= R && x < mw; x++) s += PA[ro + x];
+            for (let x = 0; x < mw; x++) { HB[ro + x] = s; const add = x + R + 1, rem = x - R;
+              if (add < mw) s += PA[ro + add]; if (rem >= 0) s -= PA[ro + rem]; } }
+          for (let x = 0; x < mw; x++) { let s = 0;
+            for (let y = 0; y <= R && y < mh; y++) s += HB[y * mw + x];
+            for (let y = 0; y < mh; y++) { const pi = (y * mw + x) * 4; let a = (s * 255 / area) | 0;
+              if (a <= 4) { px[pi + 3] = 0; } else { px[pi] = Math.min(255, px[pi] + 8); px[pi + 2] = Math.min(255, px[pi + 2] + 22); px[pi + 3] = a > 255 ? 255 : a; }
+              const add = y + R + 1, rem = y - R; if (add < mh) s += HB[add * mw + x]; if (rem >= 0) s -= HB[rem * mw + x]; } }
           ctx.putImageData(frame, 0, 0);
-          if (count < MIN_PERSON_PIXELS || maxX < 0) { this.player = null; return; }
-          const footX = footSumX / footCount;
-          this.player = { nfx: footX / mw, nfy: maxY / mh, bx: minX, by: minY, bw: maxX - minX + 1, bh: maxY - minY + 1 };
+          // split into separate people by runs of occupied columns (people standing apart)
+          const minCol = Math.max(2, (mh * 0.04) | 0), gapCols = Math.max(2, (mw * 0.035) | 0);
+          const runs = []; let rs = -1, last = -1, gap = 0;
+          for (let x = 0; x < mw; x++) { const occ = CC[x] > minCol;
+            if (occ) { if (rs < 0) rs = x; last = x; gap = 0; }
+            else if (rs >= 0) { gap++; if (gap > gapCols) { runs.push([rs, last]); rs = -1; } } }
+          if (rs >= 0) runs.push([rs, last]);
+          const players = [];
+          for (const [a, b] of runs) { let minY = mh, maxY = -1, count = 0;
+            for (let x = a; x <= b; x++) if (CC[x] > 0) { count += CC[x]; if (CT[x] < minY) minY = CT[x]; if (CB[x] > maxY) maxY = CB[x]; }
+            if (count < MIN_PERSON_PIXELS || maxY < 0) continue;
+            let fsum = 0, fc = 0; const ro = maxY * mw;
+            for (let x = a; x <= b; x++) if (PA[ro + x]) { fsum += x; fc++; }
+            const footX = fc ? fsum / fc : (a + b) / 2;
+            players.push({ nfx: footX / mw, nfy: maxY / mh, bx: a, by: minY, bw: b - a + 1, bh: maxY - minY + 1, count });
+          }
+          players.sort((p, q) => q.count - p.count);
+          this.players = players.slice(0, 6); this.player = this.players[0] || null;
         }
       }
 
@@ -400,26 +428,8 @@
               gl_FragColor=vec4(col,1.0);} ` });
       }
 
-      /* ===================== Billboard ===================== */
-      class Billboard {
-        constructor(scene, cutoutCanvas) {
-          this.tex = new THREE.CanvasTexture(cutoutCanvas); this.tex.colorSpace = THREE.SRGBColorSpace;
-          this.tex.minFilter = THREE.LinearFilter; this.tex.magFilter = THREE.LinearFilter; this.tex.generateMipmaps = false;
-          this.mat = new THREE.MeshBasicMaterial({ map: this.tex, transparent: true, depthWrite: false, alphaTest: 0.05, side: THREE.DoubleSide });
-          this.mesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), this.mat); this.mesh.visible = false; scene.add(this.mesh);
-          this.ringMat = new THREE.MeshBasicMaterial({ color: 0x49d98a, transparent: true, opacity: 0.85, side: THREE.DoubleSide });
-          this.ring = new THREE.Mesh(new THREE.RingGeometry(0.32, 0.46, 28), this.ringMat);
-          this.ring.rotation.x = -Math.PI / 2; this.ring.visible = false; scene.add(this.ring);
-        }
-        // The person is composited as a 2D overlay on top (fgCanvas), so here we only
-        // place the glowing foot-ring on the floor at the player's mapped position.
-        update(player, mw, mh, world3, camera, onLava, out) {
-          this.mesh.visible = false;
-          if (!player || !world3) { this.ring.visible = false; return; }
-          this.ring.position.set(world3.x, BLOCK_H + 0.03, world3.z);
-          this.ringMat.color.setHex(out ? 0xff5a2a : (onLava ? 0xff6a2a : 0x49d98a)); this.ring.visible = true;
-        }
-      }
+      /* Players are composited as a 2D overlay (fgCanvas) on top; the floor only needs
+         a glowing foot-ring per player (see StageRenderer ring pool below). */
 
       /* ===================== StageRenderer (dynamic grid) ===================== */
       class StageRenderer {
@@ -443,7 +453,13 @@
           this.brickMat = new THREE.MeshStandardMaterial({ map: makeBrickTexture(), roughness: 0.95, metalness: 0.0 });
           this.blockGeo = new THREE.BoxGeometry(BLOCK * 0.96, BLOCK_H, BLOCK * 0.96);
           this.blockGroup = new THREE.Group(); this.scene.add(this.blockGroup);
-          this.billboard = new Billboard(this.scene, cutoutCanvas);
+          this.rings = [];                          // one glowing foot-ring per detected player
+          for (let i = 0; i < 6; i++) {
+            const mat = new THREE.MeshBasicMaterial({ color: 0x49d98a, transparent: true, opacity: 0.85, side: THREE.DoubleSide });
+            const mesh = new THREE.Mesh(new THREE.RingGeometry(0.30, 0.46, 28), mat);
+            mesh.rotation.x = -Math.PI / 2; mesh.visible = false; this.scene.add(mesh);
+            this.rings.push({ mesh, mat });
+          }
           this.embers = null; this._initEmbers();
           this.rumbleAmp = 0;
           window.addEventListener('resize', () => this.resize());
@@ -524,9 +540,16 @@
             } else if (b.state === 'GONE') { m.visible = false; } }
           this._updateEmbers(dt);
         }
-        syncPlayer(player, mw, mh, uv, onLava, out) {
-          const world3 = (player && uv) ? this.gridToWorld(uv.u, uv.v) : null;
-          this.billboard.update(player, mw, mh, world3, this.camera, onLava, out);
+        syncPlayers(players) {
+          for (let i = 0; i < this.rings.length; i++) {
+            const r = this.rings[i], p = players[i];
+            if (p && p.uv) {
+              const w = this.gridToWorld(p.uv.u, p.uv.v);
+              r.mesh.position.set(w.x, BLOCK_H + 0.03, w.z);
+              r.mat.color.setHex(p.out ? 0xff5a2a : (p.onLava ? 0xff6a2a : 0x49d98a));
+              r.mesh.visible = true;
+            } else r.mesh.visible = false;
+          }
         }
         render(now) {
           this.lavaMat.uniforms.uTime.value = now * 0.001;
@@ -552,12 +575,13 @@
           this.score = $('scorePill'); this.banner = $('banner'); this.verdict = $('verdict'); this.fps = $('fps'); }
         show(v) { this.el.classList.toggle('show', v); }
         setBanner(t) { this.banner.textContent = t; this.banner.style.opacity = t ? 1 : 0; }
-        update(state, timeLeft, world, present, onLava, out, score) {
-          this.round.textContent = 'Round ' + (world.round + 1); this.score.textContent = 'Score ' + score;
+        update(state, timeLeft, world, present, anyLava, players, score) {
+          const n = players.length;
+          this.round.textContent = 'Round ' + (world.round + 1) + (n > 1 ? `  ·  ${n} players` : '');
+          this.score.textContent = 'Score ' + score;
           this.timer.textContent = (state === 'PICK') ? Math.ceil(timeLeft) : '';
           if (!present) this.verdict.textContent = '';
-          else if (out) { this.verdict.textContent = 'OUT'; this.verdict.style.color = '#ff5a2a'; }
-          else if (onLava) { this.verdict.textContent = 'LAVA!'; this.verdict.style.color = '#ff6a2a'; }
+          else if (anyLava) { this.verdict.textContent = 'LAVA!'; this.verdict.style.color = '#ff6a2a'; }
           else { this.verdict.textContent = 'SAFE'; this.verdict.style.color = '#7CFC7C'; }
         }
       }
@@ -619,8 +643,7 @@
           this.bgCanvas = $('bgCanvas'); this.bgCtx = this.bgCanvas.getContext('2d');
           this.fgCanvas = $('fgCanvas'); this.fgCtx = this.fgCanvas.getContext('2d');
           this.state = S.TITLE; this.tEnter = performance.now();
-          this.score = 0; this.outLatch = false; this.outFrames = 0;
-          this.uv = null; this.cell = null; this.onLava = false; this.collapseStartedAt = 0;
+          this.score = 0; this.players = []; this.collapseStartedAt = 0;
           this._last = performance.now(); this._fps = 0; this.loopRunning = false;
           this.wireUi();
         }
@@ -686,11 +709,12 @@
         drawCutoutOverlay() { const c = this.fgCanvas, cw = c.clientWidth, ch = c.clientHeight;
           if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
           const g = this.fgCtx; g.clearRect(0, 0, cw, ch);
+          g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';   // smooth upscaled edges
           const cut = this.cutout.canvas; if (cut.width) g.drawImage(cut, 0, 0, cw, ch); }
         beginGame() { this.go(null); this.hud.show(true); this.score = 0; this.startRound(0); }
         startRound(n) { this.screen('gameover', false); this.hud.show(true);
           this.world.assignRound(n); this.renderer.buildBlocks(this.world);
-          this.renderer.rumbleAmp = 0; this.outLatch = false; this.outFrames = 0;
+          this.renderer.rumbleAmp = 0;
           this.setState(S.ROUND_INTRO); this.hud.setBanner('ROUND ' + (n + 1)); }
 
         loop(now) {
@@ -702,26 +726,31 @@
           this.cutout.update(this.tracker);
           if (this.state === S.CALIBRATING) { this.calib.draw(); return; }
 
-          this.uv = null; this.cell = null; const p = this.cutout.player;
-          if (p && this.floor) { const g = this.floor.mapFootToGrid(p.nfx, p.nfy); this.uv = g;
-            const c = Math.floor(g.u * COLS), r = Math.floor(g.v * ROWS);
-            if (r >= 0 && r < ROWS && c >= 0 && c < COLS) this.cell = { r, c }; }
-          const block = this.cell ? this.world.at(this.cell.r, this.cell.c) : null;
-          this.onLava = !!(block && (block.state === 'GONE' || block.state === 'FALLING'));
+          // Map every detected person to a grid cell (multi-player).
+          this.players = [];
+          for (const pl of this.cutout.players) {
+            let uv = null, cell = null;
+            if (this.floor) { uv = this.floor.mapFootToGrid(pl.nfx, pl.nfy);
+              const c = Math.floor(uv.u * COLS), r = Math.floor(uv.v * ROWS);
+              if (r >= 0 && r < ROWS && c >= 0 && c < COLS) cell = { r, c }; }
+            const block = cell ? this.world.at(cell.r, cell.c) : null;
+            const onLava = !!(block && (block.state === 'GONE' || block.state === 'FALLING'));
+            this.players.push({ uv, cell, block, onLava, out: false });
+          }
+          const present = this.players.length > 0;
+          const anyLava = this.players.some((p) => p.onLava);
 
           this.fsmUpdate(now, dt);
 
-          let out = this.outLatch;
-          if ((this.state === S.COLLAPSE || this.state === S.RESOLVE) && block && !block.safe) {
-            this.outFrames = this.onLava ? this.outFrames + 1 : Math.max(0, this.outFrames - 1);
-            if (this.outFrames > 6 && !this.outLatch) { this.outLatch = true; out = true; } }
+          const collapsing = (this.state === S.COLLAPSE || this.state === S.RESOLVE);
+          for (const p of this.players) p.out = collapsing && p.block && !p.block.safe && p.onLava;
 
           this.drawRoom();
           if (this.renderer) { this.renderer.syncBlocks(this.world, dt, now);
-            this.renderer.syncPlayer(p, this.cutout.mw, this.cutout.mh, this.uv, this.onLava, out); this.renderer.render(now); }
+            this.renderer.syncPlayers(this.players); this.renderer.render(now); }
           this.drawCutoutOverlay();
-          this.hud.update(this.state, this.timeLeft(), this.world, !!p, this.onLava, out, this.score);
-          if (DEBUG) this.hud.fps.textContent = `${this._fps.toFixed(0)}fps` + (this.cell ? ` u${this.uv.u.toFixed(2)} v${this.uv.v.toFixed(2)} r${this.cell.r}c${this.cell.c}` : '');
+          this.hud.update(this.state, this.timeLeft(), this.world, present, anyLava, this.players, this.score);
+          if (DEBUG) this.hud.fps.textContent = `${this._fps.toFixed(0)}fps · ${this.players.length}p`;
         }
         timeLeft() { return (this.state === S.PICK) ? Math.max(0, this.world.cfg.pickSeconds - this.sinceEnter()/1000) : 0; }
         fsmUpdate(now, dt) {
@@ -736,9 +765,14 @@
             case S.COLLAPSE: { const el = now - this.collapseStartedAt;
               for (const b of this.world.blocks) if (b.state === 'SHAKING' && el > b.fallDelayMs) b.state = 'FALLING';
               if (this.world.allUnsafeGone()) { this.hud.setBanner(''); this.setState(S.RESOLVE); } break; }
-            case S.RESOLVE: if (t > 1500) { const survived = !this.outLatch;
-              if (survived) this.score += (this.world.round + 1) * 10;
-              if (survived && this.world.round < 9) this.startRound(this.world.round + 1); else this.endGame(survived); } break;
+            case S.RESOLVE: if (t > 1500) {
+              const inPlay = this.players.filter((p) => p.cell);
+              const survivors = inPlay.filter((p) => !p.onLava).length, total = inPlay.length;
+              if (total > 0) this.score += survivors * (this.world.round + 1) * 5;
+              if (total > 0 && survivors === 0) this.endGame(false);          // everyone fell
+              else if (this.world.round < 9) this.startRound(this.world.round + 1);
+              else this.endGame(true);
+            } break;
           }
         }
         endGame(survived) { this.setState(S.GAME_OVER); this.hud.show(false);
