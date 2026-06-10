@@ -288,28 +288,33 @@
       const _nz=(a)=>_sc(a,1/_norm(a));
       const _T3=(M)=>[[M[0][0],M[1][0],M[2][0]],[M[0][1],M[1][1],M[2][1]],[M[0][2],M[1][2],M[2][2]]];
       const _mv=(M,v)=>[_dot(M[0],v),_dot(M[1],v),_dot(M[2],v)];
-      // corners: normalized [0,1] image, order FL,FR,NR,NL. World floor rect at y=0.
-      // Returns { Rcw (camera->world rotation, cols), C (camera centre) } or null.
-      function poseFromCorners(corners, fovY, aspect, cols, rows) {
-        const sy = 1 / Math.tan(fovY / 2), sx = sy / aspect;
+      // Estimate camera intrinsics (a single FOV) + pose from 4 floor corners.
+      // corners: video-normalized [0,1], order FL,FR,NR,NL. aspect = videoW/videoH.
+      function poseFromCorners(corners, aspect, cols, rows) {
         const ndc = corners.map((c) => ({ x: 2*c.x - 1, y: 1 - 2*c.y }));
         const src = [ {x:-cols/2,y:0}, {x:cols/2,y:0}, {x:cols/2,y:rows}, {x:-cols/2,y:rows} ];
         const H = computeHomography(src, ndc); if (!H) return null;
-        const G = [[H[0],H[1],H[2]],[H[3],H[4],H[5]],[H[6],H[7],H[8]]];
-        const B = [[G[0][0]/sx,G[0][1]/sx,G[0][2]/sx],[G[1][0]/sy,G[1][1]/sy,G[1][2]/sy],[-G[2][0],-G[2][1],-G[2][2]]];
-        const col = (M,j) => [M[0][j],M[1][j],M[2][j]];
-        let a = col(B,0), c = col(B,1), t = col(B,2);
+        const g1 = [H[0],H[3],H[6]], g2 = [H[1],H[4],H[7]], g3 = [H[2],H[5],H[8]]; // columns of G
+        // solve the vertical focal from orthogonality of the floor's two axis vectors
+        const denom = aspect*aspect*g1[0]*g2[0] + g1[1]*g2[1];
+        let u = -g1[2]*g2[2] / denom, sy;
+        if (u > 1e-9 && isFinite(u)) sy = 1/Math.sqrt(u); else sy = 1/Math.tan(FOV_Y*Math.PI/360);
+        const fov = 2*Math.atan(1/sy), cl = Math.min(Math.max(fov, 25*Math.PI/180), 110*Math.PI/180);
+        sy = 1/Math.tan(cl/2); const sx = sy/aspect;
+        const bcol = (g) => [g[0]/sx, g[1]/sy, -g[2]];
+        let a = bcol(g1), c = bcol(g2), t = bcol(g3);
         const s = (_norm(a) + _norm(c)) / 2; if (s < 1e-9) return null;
         a = _nz(a); c = _nz(c); t = _sc(t, 1/s);
         if (t[2] > 0) { a = _sc(a,-1); c = _sc(c,-1); t = _sc(t,-1); }
-        c = _nz(_sub(c, _sc(a, _dot(a,c))));           // orthonormalize, keep a as world x-axis
-        let b = _nz(_cross(c,a)); c = _cross(a,b);
+        c = _nz(_sub(c, _sc(a, _dot(a,c)))); let b = _nz(_cross(c,a)); c = _cross(a,b);
         const Rwv = [[a[0],b[0],c[0]],[a[1],b[1],c[1]],[a[2],b[2],c[2]]];
-        const Rcw = _T3(Rwv);
-        const C = _sc(_mv(Rcw, t), -1);
-        return { Rcw, C };
+        const Rcw = _T3(Rwv); const C = _sc(_mv(Rcw, t), -1);
+        return { Rcw, C, fovYdeg: 2*Math.atan(1/sy)*180/Math.PI };
       }
-      const FOV_Y = 55;   // assumed vertical field of view (deg); tweak if alignment is slightly off
+      const FOV_Y = 55;   // fallback vertical FOV (deg) if estimation is degenerate
+      // "cover" fit: scale video to fill WxH preserving aspect (crop overflow, no stretch)
+      function coverFit(vw, vh, W, H) { const scale = Math.max(W/vw, H/vh), dw = vw*scale, dh = vh*scale;
+        return { dw, dh, ox: (W-dw)/2, oy: (H-dh)/2 }; }
 
       /* ===================== FloorMapping ===================== */
       class FloorMapping {
@@ -328,7 +333,7 @@
         update(tracker) {
           const video = tracker.video, mask = tracker.mask;
           if (!mask || !video.videoWidth) { this.players = []; this.player = null; return; }
-          const mw = tracker.maskWidth, mh = tracker.maskHeight, mir = tracker.mirrored, N = mw * mh;
+          const mw = tracker.maskWidth, mh = tracker.maskHeight, N = mw * mh;
           this.mw = mw; this.mh = mh;
           if (this.canvas.width !== mw || this.canvas.height !== mh) { this.canvas.width = mw; this.canvas.height = mh; }
           if (!this._pa || this._pa.length !== N) { this._pa = new Uint8Array(N); this._hb = new Uint16Array(N); }
@@ -336,11 +341,11 @@
           const PA = this._pa, HB = this._hb, CC = this._cc, CT = this._ct, CB = this._cb;
           CC.fill(0); CT.fill(mh); CB.fill(-1);
           const ctx = this.ctx;
-          ctx.save(); if (mir) ctx.setTransform(-1, 0, 0, 1, mw, 0); ctx.drawImage(video, 0, 0, mw, mh); ctx.restore();
+          ctx.drawImage(video, 0, 0, mw, mh);                 // un-mirrored: all math in native video space
           const frame = ctx.getImageData(0, 0, mw, mh); const px = frame.data;
           // binary person mask + per-column extents
           for (let y = 0; y < mh; y++) { const ro = y * mw;
-            for (let x = 0; x < mw; x++) { const person = isPerson(mask[ro + (mir ? (mw - 1 - x) : x)]) ? 1 : 0;
+            for (let x = 0; x < mw; x++) { const person = isPerson(mask[ro + x]) ? 1 : 0;
               PA[ro + x] = person; if (person) { CC[x]++; if (y < CT[x]) CT[x] = y; CB[x] = y; } } }
           // feather: separable box blur of the binary mask -> soft anti-aliased alpha
           const R = 3, win = 2 * R + 1, area = win * win;
@@ -501,13 +506,18 @@
             if (this.emberPos[i*3+1] > 3.6) this._seedEmber(i, 0); }
           this.emberGeo.attributes.position.needsUpdate = true;
         }
-        setCameraFromCorners(corners) { this.calibCorners = corners; this._poseCamera(); }
+        setCameraFromCorners(corners, vw, vh) { this.calibCorners = corners; this.vw = vw; this.vh = vh; this._poseCamera(); }
         _poseCamera() {
-          if (!this.calibCorners) { this.poseMatrix = null; return; }
-          const pose = poseFromCorners(this.calibCorners, this.camera.fov * Math.PI / 180, this.camera.aspect, COLS, ROWS);
+          if (!this.calibCorners || !this.vw) { this.poseMatrix = null; return; }
+          const aspect = this.vw / this.vh;
+          const pose = poseFromCorners(this.calibCorners, aspect, COLS, ROWS);
           if (!pose) { this.poseMatrix = null; return; }
-          const R = pose.Rcw;
-          const m = new THREE.Matrix4();
+          // Match the cover-cropped video: render the central crop of a full-frame frustum.
+          const W = window.innerWidth, H = window.innerHeight, cf = coverFit(this.vw, this.vh, W, H);
+          this.camera.fov = pose.fovYdeg; this.camera.aspect = aspect;
+          this.camera.setViewOffset(cf.dw, cf.dh, -cf.ox, -cf.oy, W, H);
+          this.camera.updateProjectionMatrix();
+          const R = pose.Rcw, m = new THREE.Matrix4();
           m.makeBasis(new THREE.Vector3(R[0][0], R[1][0], R[2][0]),
                       new THREE.Vector3(R[0][1], R[1][1], R[2][1]),
                       new THREE.Vector3(R[0][2], R[1][2], R[2][2]));
@@ -523,9 +533,9 @@
           });
         }
         gridToWorld(u, v) { return { x: (u - 0.5) * COLS, z: v * ROWS }; }
-        resize() { const w = window.innerWidth, h = window.innerHeight;
-          this.renderer.setSize(w, h, false); this.camera.aspect = w / h; this.camera.updateProjectionMatrix();
-          this._poseCamera(); }
+        resize() { const w = window.innerWidth, h = window.innerHeight; this.renderer.setSize(w, h, false);
+          if (this.calibCorners) { this._poseCamera(); }
+          else { this.camera.clearViewOffset(); this.camera.fov = FOV_Y; this.camera.aspect = w / h; this.camera.updateProjectionMatrix(); } }
         syncBlocks(world, dt, now) {
           for (const b of world.blocks) { if (!b.mesh) continue; const m = b.mesh;
             if (b.state === 'SOLID') {
@@ -614,7 +624,10 @@
             ? 'Tap/click corner: <b>' + CORNER_LABELS[this.corners.length] + '</b>'
             : 'Tap <b>✓ Confirm</b> to start (or Redo)';
           $('calibConfirm').classList.toggle('disabled', this.corners.length < 4); }
-        norm(e) { const r = this.canvas.getBoundingClientRect(); return { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }; }
+        norm(e) { const r = this.canvas.getBoundingClientRect(), v = this.tracker.video;   // -> video-normalized [0,1]
+          const cf = coverFit(v.videoWidth || r.width, v.videoHeight || r.height, r.width, r.height);
+          const x = (e.clientX - r.left - cf.ox) / cf.dw, y = (e.clientY - r.top - cf.oy) / cf.dh;
+          return { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) }; }
         onDown(e) { const p = this.norm(e); let near = -1, best = 0.0025;
           this.corners.forEach((c, i) => { const d = (c.x-p.x)**2 + (c.y-p.y)**2; if (d < best) { best = d; near = i; } });
           if (near >= 0) { this.dragIdx = near; this.corners[near] = p; }
@@ -628,14 +641,16 @@
         draw() { const v = this.tracker.video; if (!v.videoWidth) return;
           const cw = this.canvas.clientWidth, ch = this.canvas.clientHeight;
           if (this.canvas.width !== cw || this.canvas.height !== ch) { this.canvas.width = cw; this.canvas.height = ch; }
-          const g = this.ctx, mir = this.tracker.mirrored;
-          g.save(); if (mir) g.setTransform(-1, 0, 0, 1, cw, 0); g.drawImage(v, 0, 0, cw, ch); g.restore();
+          const g = this.ctx; g.clearRect(0, 0, cw, ch);
+          const cf = coverFit(v.videoWidth, v.videoHeight, cw, ch);
+          g.drawImage(v, cf.ox, cf.oy, cf.dw, cf.dh);
+          const S = (c) => ({ x: cf.ox + c.x*cf.dw, y: cf.oy + c.y*cf.dh });   // video-normalized -> screen
           g.lineWidth = 3; g.strokeStyle = '#ffd27a'; g.fillStyle = '#ffd27a';
           if (this.corners.length) { g.beginPath();
-            this.corners.forEach((c, i) => { const x = c.x*cw, y = c.y*ch; i ? g.lineTo(x, y) : g.moveTo(x, y); });
+            this.corners.forEach((c, i) => { const p = S(c); i ? g.lineTo(p.x, p.y) : g.moveTo(p.x, p.y); });
             if (this.corners.length === 4) g.closePath(); g.stroke();
-            this.corners.forEach((c, i) => { g.beginPath(); g.arc(c.x*cw, c.y*ch, 11, 0, 7); g.fill();
-              g.fillStyle = '#1a0d05'; g.font = 'bold 13px system-ui'; g.fillText(i+1, c.x*cw-3, c.y*ch+4); g.fillStyle = '#ffd27a'; }); }
+            this.corners.forEach((c, i) => { const p = S(c); g.beginPath(); g.arc(p.x, p.y, 11, 0, 7); g.fill();
+              g.fillStyle = '#1a0d05'; g.font = 'bold 13px system-ui'; g.fillText(i+1, p.x-3, p.y+4); g.fillStyle = '#ffd27a'; }); }
         }
       }
 
@@ -703,14 +718,15 @@
         toCalibrate() { $('stage').style.display = 'none'; this.setState(S.CALIBRATING);
           this.calib.start((fm) => { this.floor = fm; this.afterCalib(); }); }
         afterCalib() { $('stage').style.display = 'block'; $('vignette').classList.add('show');
-          if (this.renderer) this.renderer.setCameraFromCorners(this.floor.corners);
+          const v = this.tracker.video;
+          if (this.renderer) this.renderer.setCameraFromCorners(this.floor.corners, v.videoWidth, v.videoHeight);
           this.setState(S.MODE_SELECT); this.go('modeselect'); }
         drawRoom() { const v = this.tracker.video; if (!v.videoWidth) return;
           const c = this.bgCanvas, cw = c.clientWidth, ch = c.clientHeight;
           if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
-          const g = this.bgCtx;
-          g.save(); if (this.tracker.mirrored) g.setTransform(-1, 0, 0, 1, cw, 0);
-          g.drawImage(v, 0, 0, cw, ch); g.restore();
+          const g = this.bgCtx; g.clearRect(0, 0, cw, ch);
+          const cf = coverFit(v.videoWidth, v.videoHeight, cw, ch);
+          g.drawImage(v, cf.ox, cf.oy, cf.dw, cf.dh);
           // dungeon grade: warm torchlight multiply + a dark wash so the room reads as a dungeon
           g.globalCompositeOperation = 'multiply'; g.fillStyle = '#6b4a2e'; g.fillRect(0, 0, cw, ch);
           g.globalCompositeOperation = 'source-over'; g.fillStyle = 'rgba(8,4,2,0.28)'; g.fillRect(0, 0, cw, ch); }
@@ -718,7 +734,9 @@
           if (c.width !== cw || c.height !== ch) { c.width = cw; c.height = ch; }
           const g = this.fgCtx; g.clearRect(0, 0, cw, ch);
           g.imageSmoothingEnabled = true; g.imageSmoothingQuality = 'high';   // smooth upscaled edges
-          const cut = this.cutout.canvas; if (cut.width) g.drawImage(cut, 0, 0, cw, ch); }
+          const v = this.tracker.video, cut = this.cutout.canvas;
+          if (cut.width && v.videoWidth) { const cf = coverFit(v.videoWidth, v.videoHeight, cw, ch);
+            g.drawImage(cut, cf.ox, cf.oy, cf.dw, cf.dh); } }
         beginGame() { this.go(null); this.hud.show(true); this.score = 0; this.startRound(0); }
         startRound(n) { this.screen('gameover', false); this.hud.show(true);
           this.world.assignRound(n); this.renderer.buildBlocks(this.world);
