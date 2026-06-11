@@ -336,7 +336,7 @@
           const mw = tracker.maskWidth, mh = tracker.maskHeight, N = mw * mh;
           this.mw = mw; this.mh = mh;
           if (this.canvas.width !== mw || this.canvas.height !== mh) { this.canvas.width = mw; this.canvas.height = mh; }
-          if (!this._pa || this._pa.length !== N) { this._pa = new Uint8Array(N); this._hb = new Uint16Array(N); }
+          if (!this._pa || this._pa.length !== N) { this._pa = new Uint8Array(N); this._hb = new Uint16Array(N); this._ap = new Float32Array(N); }
           if (!this._cc || this._cc.length !== mw) { this._cc = new Int32Array(mw); this._ct = new Int32Array(mw); this._cb = new Int32Array(mw); }
           const PA = this._pa, HB = this._hb, CC = this._cc, CT = this._ct, CB = this._cb;
           CC.fill(0); CT.fill(mh); CB.fill(-1);
@@ -353,10 +353,12 @@
             for (let x = 0; x <= R && x < mw; x++) s += PA[ro + x];
             for (let x = 0; x < mw; x++) { HB[ro + x] = s; const add = x + R + 1, rem = x - R;
               if (add < mw) s += PA[ro + add]; if (rem >= 0) s -= PA[ro + rem]; } }
+          const AP = this._ap, K = 0.5;          // temporal smoothing (EMA) of alpha -> kills edge flicker
           for (let x = 0; x < mw; x++) { let s = 0;
             for (let y = 0; y <= R && y < mh; y++) s += HB[y * mw + x];
-            for (let y = 0; y < mh; y++) { const pi = (y * mw + x) * 4; let a = (s * 255 / area) | 0;
-              if (a <= 4) { px[pi + 3] = 0; } else { px[pi] = Math.min(255, px[pi] + 8); px[pi + 2] = Math.min(255, px[pi + 2] + 22); px[pi + 3] = a > 255 ? 255 : a; }
+            for (let y = 0; y < mh; y++) { const idx = y * mw + x, pi = idx * 4;
+              let a = s * 255 / area; a = AP[idx] = AP[idx] * K + a * (1 - K); const av = a | 0;
+              if (av <= 6) { px[pi + 3] = 0; } else { px[pi] = Math.min(255, px[pi] + 8); px[pi + 2] = Math.min(255, px[pi + 2] + 22); px[pi + 3] = av > 255 ? 255 : av; }
               const add = y + R + 1, rem = y - R; if (add < mh) s += HB[add * mw + x]; if (rem >= 0) s -= HB[rem * mw + x]; } }
           ctx.putImageData(frame, 0, 0);
           // split into separate people by runs of occupied columns (people standing apart)
@@ -441,7 +443,7 @@
       class StageRenderer {
         constructor(canvas, cutoutCanvas) {
           this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: true, powerPreference: 'high-performance' });
-          this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+          this.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));   // mobile fill-rate headroom
           this.renderer.setClearColor(0x000000, 0);        // transparent: real-room canvas shows behind
           this.scene = new THREE.Scene();                  // no background / no fog (AR overlay)
           this.camera = new THREE.PerspectiveCamera(FOV_Y, 1, 0.1, 100);
@@ -469,7 +471,10 @@
           this.embers = null; this._initEmbers();
           this.rumbleAmp = 0;
           window.addEventListener('resize', () => this.resize());
-          canvas.addEventListener('webglcontextlost', (e) => e.preventDefault(), false);
+          // iOS Safari drops the WebGL context on backgrounding; recover instead of going black.
+          this.contextLost = false;
+          canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); this.contextLost = true; }, false);
+          canvas.addEventListener('webglcontextrestored', () => { this.contextLost = false; this.resize(); }, false);
           this.layoutForGrid(); this.resize();
         }
         layoutForGrid() {
@@ -563,6 +568,7 @@
           }
         }
         render(now) {
+          if (this.contextLost) return;
           this.lavaMat.uniforms.uTime.value = now * 0.001;
           this.lavaLight.intensity = 0.7 + Math.sin(now * 0.006) * 0.2 + Math.random() * 0.18; // torch flicker
           if (this.poseMatrix) {
@@ -667,7 +673,7 @@
           this.fgCanvas = $('fgCanvas'); this.fgCtx = this.fgCanvas.getContext('2d');
           this.state = S.TITLE; this.tEnter = performance.now();
           this.score = 0; this.players = []; this.collapseStartedAt = 0;
-          this._last = performance.now(); this._fps = 0; this.loopRunning = false;
+          this._last = performance.now(); this._fps = 0; this.loopRunning = false; this._lastSeg = 0;
           this.wireUi();
         }
         wireUi() {
@@ -747,9 +753,9 @@
           requestAnimationFrame((t) => this.loop(t));
           const dt = Math.min(0.05, (now - this._last) / 1000); this._last = now;
           this._fps = this._fps * 0.9 + (1 / Math.max(dt, 1e-3)) * 0.1;
-          this.tracker.detect(performance.now());
           if (this.state === S.TITLE) return;
-          this.cutout.update(this.tracker);
+          // run segmentation + cutout at ~20Hz (decoupled from the render loop) for headroom
+          if (now - this._lastSeg >= 50) { this.tracker.detect(performance.now()); this.cutout.update(this.tracker); this._lastSeg = now; }
           if (this.state === S.CALIBRATING) { this.calib.draw(); return; }
 
           // Map every detected person to a grid cell (multi-player).
